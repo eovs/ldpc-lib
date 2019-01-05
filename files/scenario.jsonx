@@ -1,0 +1,30 @@
+{
+  input = array @"resultq_codes.jsonx"
+  output_file_mask = "data%02d.jsonx"
+  extra_output_file = "in_out.txt"
+
+  subcode_columns = 1
+  target_girth = 6
+  target_girth_subcode = 12
+  tailbite_length = 126
+  exact_tailbite = 1 // 1 if exact, 0 if min
+  starting_columns = 21
+  continue_existing = 0
+  trials = {
+    min_candidates = 100
+    enough_candidates = 1000
+    max_cycles_per_iteration = 10000000
+  }
+  error_name = "FER"
+  simulation = {
+  decoder_type = 7
+  number_of_iterations = 15
+  number_of_codewords = 10000000
+  number_of_err_blocks = 25
+  tested_code_lengths = array { 21 25 32 }
+  start_snr_for_estimation = 1.3
+  snr_step = 0.1
+  snr_bound = 0.015
+  number_of_selected_codes = 50
+  }
+}

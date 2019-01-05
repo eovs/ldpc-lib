@@ -1,0 +1,11 @@
+{
+    random_seed = 0                     // 0 means "random initialization", non-0 sets the seed
+    codes_to_test = 10                  // hardcoded constant in previous revisions
+    matrices_to_test = 1                // was also "hardcoded"
+    modulation_type = 0                 // 0 - no modulation  
+    permutation_type = 0                // 0 - no permutation
+    permutation_block = 128             // 128 - suitable size
+    permutation_inter = 1               // 1 - no interleave
+	punctured_blocks = 0				// number of blocks to be punctured
+	
+}

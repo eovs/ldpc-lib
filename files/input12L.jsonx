@@ -1,0 +1,52 @@
+{
+    defaults = @"default_constants.jsonx"
+    rows = 30
+    columns = 60
+    target_girth = 8
+    target_tailbite_length = 67
+    snrs = array { 1.0 }
+    trials = {
+        base_matrix = 10000
+        column = 100
+    }
+    num_random_codes = 100000
+    max_bp_iterations = 50
+    num_codewords = 100000000
+    error_blocks = 20
+    start_config_number = 0
+
+    // Decoder type: 0 - BP, 1 - SP, 2 - ASP, 3 - MS, 4 - IMS, 5 - IASP
+    decoder_type = 5                    
+
+    // Overriding default constants: random base matrix is generated 5 times, 6 random codes tested
+    codes_to_test = 5
+    matrices_to_test = 2
+
+    information_columns = {
+        possible_weights = array { 2 3 16 }
+
+        // Weight constraints: array of arrays, the internal arrays have the form of:
+        // array { <weight> <min> <max> }
+        weight_constraints = array {
+            array { 2 4 4 }
+            array { 16 7 7 }
+        }
+    }
+
+    checking_columns = {
+        algo = "double"
+        first_component_rows = 15
+        additional_columns = array { 13 1 11 3 9 2 }
+    }
+
+    // Describe what/how exactly we want to optimize
+    error_minimization = {
+        name = "FER"
+        threshold = 1e-2
+        good_code_multiple = 1.25
+        bad_code_tuning = array {
+            { codes = 0     multiple = 2 }
+            { codes = 2     multiple = 1 }
+        }
+    }
+}

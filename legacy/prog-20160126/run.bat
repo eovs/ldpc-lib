@@ -1,0 +1,1 @@
+search_fast input32_16.cfg out.dat

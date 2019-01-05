@@ -1,0 +1,22 @@
+12  % number of rows 
+24 4 %total # columns and # for subcode
+8 10  % target girth and for subcode
+85 % target TailBiting length
+1   % Flag =1/0 if g computed for M=EXACT/MIN tailbiting length
+21 % nb starting number of columns
+0  % 0=start with empty matrix, 1=continue, nb already exists 
+100 % minimum candidates to continue
+10000   % enough candidates to continue
+10000000 % maximum # of cycles per iteration
+ 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 2 2 0 2 2
+ 2 2 0 0 0 0 0 0 0 0 0 2 0 2 0 0 0 2 0 1 0 2 0 0
+ 0 2 2 0 0 0 0 0 0 0 0 0 2 1 0 0 2 0 0 1 1 0 1 0
+ 0 0 2 2 0 0 0 0 0 0 0 0 0 0 2 0 1 0 1 1 0 1 0 0
+ 0 0 0 2 2 0 0 0 0 0 0 0 0 0 0 0 1 0 1 0 0 0 1 1
+ 0 0 0 0 2 2 0 0 0 0 0 0 1 0 0 2 0 1 0 0 0 1 1 1
+ 0 0 0 0 0 2 2 0 0 0 0 1 0 1 1 0 0 0 0 0 1 1 0 1
+ 0 0 0 0 0 0 2 2 0 0 0 0 0 0 0 0 0 1 1 1 0 1 1 0
+ 0 0 0 0 0 0 0 2 2 0 0 0 1 0 0 1 0 0 1 0 1 1 0 0
+ 0 0 0 0 0 0 0 0 2 2 0 1 0 0 1 1 0 0 0 0 1 0 1 0
+ 0 0 0 0 0 0 0 0 0 2 2 0 0 0 1 0 1 0 1 0 1 0 0 1
+ 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 1 0 1 0 1 0 0 0 1

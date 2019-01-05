@@ -1,0 +1,177 @@
+{
+    defaults = @"default_constants.jsonx"
+    rows = 16
+    columns = 32
+    target_girth = 8
+    target_tailbite_length = 126
+    snrs = array { 1.7 }
+    snrs = array { 2.7 }
+    trials = {
+        base_matrix = 100000
+        column = 200
+    }
+	random_seed = 1
+    num_random_codes = 1000000
+    max_bp_iterations = 15
+    num_codewords = 100000000
+    error_blocks = 50
+    start_config_number = 0
+
+    // Decoder type: 0 - BP, 1 - SP, 2 - ASP, 3 - MS, 4 - IMS, 5 - IASP
+    decoder_type = 7                    
+
+	// Modulation type: 
+    // 0 - skip, 1 - QAM4, 2 - QAM16, 3 - QAM64, 4 - QAM256 
+    modulation_type = 0                    
+
+    // Permutation type: 
+    // 0 - skip, 1 - random , 2 - deterministic (KBD), 3 - block random, 4 - interleaved random 
+    permutation_type = 0        
+
+    // Permutation block size - for block random
+    permutation_block = 128
+    
+    // Permutation_interleave - for interleaved random
+    permutation_inter = 1    
+	
+	// Number of blocks to be punctured
+	punctured_blocks = 0
+	
+    // Overriding default constants: random base matrix is generated 5 times, 6 random codes tested
+    codes_to_test = 6
+    matrices_to_test = 5
+
+    // This is an illustrative example of the new checking_columns format.
+    // 
+    // checking_columns = {
+    //     blocks = array {
+    //         // Block go from wide to narrow (as illustrated).
+    //         // Block types: "bidiagonal" and "unidiagonal"
+    //     
+    //         // For all block types, the parameter "height"
+    //         // specifies the number of rows for this block.
+    //         // At most one block may have "height" unspecified.
+    //     
+    //         // For "bidiagonal", the parameter "special_column_span"
+    //         // says how much rows the special column covers. By default,
+    //         // it is the same as "height".
+    //
+    //         {
+    //             type = "unidiagonal"                          // 2             ?               XXXX
+    //             height = 5                                    //   2                           XXXX
+    //                                                           //     2                         XXXX
+    //                                                           //       2       ?         ?     XXXX
+    //                                                           //         2                     XXXX
+    //         }
+    //         {
+    //             type = "bidiagonal"                           //           2       2         2 XXXX
+    //             height = 5                                    //           2 2             ?   XXXX
+    //             //special_column_span is unspecified          //             2 2   1           XXXX
+    //                                                           //               2 2     ?       XXXX
+    //                                                           //                 2 2         1 XXXX
+    //         }
+    //         {
+    //             type = "bidiagonal"                           //                     2         XXXX
+    //             //height is unspecified                       //                     2 2       XXXX
+    //             special_column_span = 10                      //                       2 2     XXXX
+    //                                                           //                         2 2   XXXX
+    //                                                           //                           2 2 XXXX
+    //         }
+    //     }
+    //     patches = array {
+    //         // Patches say where the additional values should be.
+    //         // Possible parameters are "col", "row" and "weight".
+    //         // "col" and "row" are ranges. Hyphens for intervals are recognized.
+    //         // Patches do not override each other but apply cumulatively. They must not contradict.
+    //         // Some of the patches assume random choices. These choices will obey the row constraints.
+    //
+    //         { col = 8       weight = 4 } // says that in column 8 the weight should be 4.
+    //         { col = "12-14" weight = 3 } // says that in columns 12 to 14 weights should be 3.
+    //     }
+    // }
+
+    // ******************* The very default example ******************** //
+    
+    information_columns_example_default = {
+        possible_weights = array { 2 3 14 }
+        weight_constraints = array {
+            array {  2 0 2 }
+            array { 14 3 4 }
+        }
+    }
+    checking_columns_example_default = {
+        blocks = array { { type = "bidiagonal" } }
+    }
+    row_constraints_example_default = {
+        possible_weights = array { 6 7 8 }
+    }
+
+    // ******************* The double-encoding example ********************** //
+
+    information_columns_example_double = {
+        possible_weights = array { 2 3 14 }
+        weight_constraints = array {
+            array {  2 0 2 }
+            array { 14 3 4 }
+        }
+    }
+    checking_columns_example_double = {
+        blocks = array {
+            { type = "bidiagonal"   height = 8 }
+            { type = "bidiagonal"   special_column_span = 8 }
+        }
+        patches = array {
+            { col = "13 15"  weight = 3 }
+        }
+    }
+    row_constraints_example_double = {
+        possible_weights = array { 6 7 8 }
+    }
+
+    // ******************* The Qualcomm example ********************** //
+    // Corresponds to the following configuration:
+    
+    // rweights=[ 6 7 13 ];     % 114
+    // rnumbers=[ 8 4 4  ];     % 16
+    // cweights=[ 1 2 3 7 9 ];  % 22        SNR=1.8 FER=0.0135 
+    // cnumbers=[ 5 8 8 8 3 ];  % 32             
+
+
+    checking_columns = {
+        blocks = array {
+            { type = "unidiagonal"  height = 5 }
+            { type = "bidiagonal" }
+        }
+        patches = array {
+            { col = "14 15"  weight = 3 }
+        }
+    }
+    information_columns = {
+        possible_weights = array { 3 7 9 }
+        weight_constraints = array {
+            array { 3 5 5 }
+            array { 7 8 8 }
+            array { 9 3 3 }
+        }
+    }
+    row_constraints = {
+        possible_weights = array { 6 7 13 }
+        weight_constraints = array {
+            array {  6 8 8 }
+            array {  7 4 4 }
+            array { 13 4 4 }
+        }
+    }
+
+
+    // Describe what/how exactly we want to optimize
+    error_minimization = {
+        name = "FER"
+        threshold = 1e-1
+        good_code_multiple = 1.25
+        bad_code_tuning = array {
+            { codes = 0     multiple = 2 }
+            { codes = 2     multiple = 1 }
+        }
+    }
+}

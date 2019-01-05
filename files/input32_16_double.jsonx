@@ -1,0 +1,23 @@
+{
+    defaults = @"input32_16.jsonx"
+    
+    information_columns = {
+        possible_weights = array { 2 3 14 }
+        weight_constraints = array {
+            array {  2 0 2 }
+            array { 14 3 4 }
+        }
+    }
+    checking_columns = {
+        blocks = array {
+            { type = "bidiagonal"   height = 8 }
+            { type = "bidiagonal"   special_column_span = 8 }
+        }
+        patches = array {
+            { col = "13 15"  weight = 3 }
+        }
+    }
+    row_constraints = {
+        possible_weights = array { 6 7 8 }
+    }
+}
