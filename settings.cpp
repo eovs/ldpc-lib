@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include <ios>
+#include <iomanip>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -474,13 +475,24 @@ void settings::to_stream_impl(std::ostream &stream, int indent, bool newline) co
         }
         case MATRIX: {
             stream << "matrix (" << data_matrix->n_rows() << " " << data_matrix->n_cols() << ") {\n";
+
+            unsigned field_length = 0;
+            for (int r = 0, r_max = data_matrix->n_rows(); r < r_max; ++r) {
+                for (int c = 0, c_max = data_matrix->n_cols(); c < c_max; ++c) {
+                    ostringstream oss;
+                    (*data_matrix)(r, c).to_stream_impl(oss, indent + 1, false);
+                    // no whitespace here
+                    field_length = std::max(field_length, (unsigned) oss.str().length() - 1);
+                }
+            }
             for (int r = 0, r_max = data_matrix->n_rows(); r < r_max; ++r) {
                 stream << indentor(indent + 1);
                 for (int c = 0, c_max = data_matrix->n_cols(); c < c_max; ++c) {
+                    stream << std::setw(field_length);
                     (*data_matrix)(r, c).to_stream_impl(stream, indent + 1, c + 1 == c_max);
                 }
             }
-            stream << indentor(indent + 1) << "}" << last;
+            stream << indentor(indent) << "}" << last;
             break;
         }
         case OBJECT_REF: {

@@ -25,8 +25,12 @@ typedef struct
 
 #define NOT_FOUND   -1
 #endif   //0
+
 static int Qav[4] = { 4, 16, 64, 256 };
+#ifndef SKIP_MEX
 static int logQav[4] = { 2, 4, 6, 8 };
+#endif
+
 static int findQ( int q )
 {
     for( int i = 0; i < 4; i++ )

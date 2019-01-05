@@ -3,6 +3,7 @@
 #include <limits>
 #include <vector>
 #include <string>
+#include <set>
 #include <map>
 #include <utility>
 #include <queue>
@@ -20,6 +21,7 @@
 
 const int HIGHLY_IMPROBABLE_INVERSE_PROBABILITY = 1000000;
 
+using std::set;
 using std::vector;
 using std::string;
 using std::pair;
@@ -43,7 +45,7 @@ pair< int, int > intersect_pairs(pair< int, int > const &l, pair< int, int > con
     return make_pair(lb, rb);
 }
 
-bool can_assign_information_columns(vector< int > info_weights, int current_column, vector< int > row_weights, vector< int > const &selected) {
+pair< bool, vector< int > > can_assign_information_columns(vector< int > info_weights, int current_column, vector< int > row_weights, vector< int > const &selected) {
     for (unsigned i = 0, i_max = (unsigned int)selected.size(); i < i_max; ++i) {
         row_weights[selected[i]]--;
     }
@@ -67,27 +69,37 @@ bool can_assign_information_columns(vector< int > info_weights, int current_colu
 //    }
 
     std::sort(info_weights.begin(), info_weights.end());
-    std::priority_queue< int > queue;
+    std::priority_queue< pair< int, int > > queue;
     for (unsigned i = 0, i_max = (unsigned int)row_weights.size(); i < i_max; ++i) {
         if (row_weights[i] > 0) {
-            queue.push(row_weights[i]);
+            queue.push(make_pair(row_weights[i], i));
         }
     }
 
     for (int i = (int) info_weights.size() - 1; i > current_column; --i) {
-        vector< int > new_weights;
+        vector< pair< int, int > > new_weights;
         if ((int) queue.size() < info_weights[i]) {
-            return false;
+            return make_pair(false, std::vector< int >());
         }
         for (int j = 0; j < info_weights[i]; ++j) {
-            int curr = queue.top();
+            pair< int, int > curr = queue.top();
             queue.pop();
-            if (curr > 1) {
-                new_weights.push_back(curr - 1);
+            if (curr.first > 1) {
+                new_weights.push_back(make_pair(curr.first - 1, curr.second));
             }
         }
         for (int j = 0; j < (int) new_weights.size(); ++j) {
             queue.push(new_weights[j]);
+        }
+    }
+    set< int > used_columns;
+    vector< int > rv;
+    while (queue.size() > 0) {
+        pair< int, int > top = queue.top();
+        queue.pop();
+        if (used_columns.count(top.second) == 0) {
+            used_columns.insert(top.second);
+            rv.push_back(top.second);
         }
     }
 //    if (queue.size() > 0) {
@@ -101,7 +113,7 @@ bool can_assign_information_columns(vector< int > info_weights, int current_colu
 //        printf("\n");
 //        die("can_assign is broken: queue.size() is %d", qs);
 //    }
-    return true;
+    return make_pair(true, rv);
 }
 
 struct ace_evaluator : graph_spider< int > {
@@ -500,7 +512,7 @@ base_matrix random_base_matrix(
                 // 5.2.2. Determining valid row indices for our elements.
                 vector< int > valid_indices;
 
-                if (col == num_check_symbols && !can_assign_information_columns(real_information_column_weights, -1, row_values, valid_indices)) {
+                if (col == num_check_symbols && !can_assign_information_columns(real_information_column_weights, -1, row_values, valid_indices).first) {
                     if (debug) {
                         printf("[DEBUG] [base_matrix] Everything is bad from the very beginning\n");
                     }
@@ -530,11 +542,24 @@ base_matrix random_base_matrix(
                         selected_indices[i] = valid_indices[selected_indices[i]];
                     }
 
-                    if (!can_assign_information_columns(real_information_column_weights, max(0, col - num_check_symbols), row_values, selected_indices)) {
+                    if (!can_assign_information_columns(real_information_column_weights, max(0, col - num_check_symbols), row_values, selected_indices).first) {
                         if (debug) {
                             printf("[DEBUG] [base_matrix] col = %d, assignment failed, continuing\n", col);
                         }
-                        continue;
+                        if (trial_column + 1 < trials_column) {
+                            continue;
+                        }
+                        if (debug) {
+                            printf("[DEBUG] last attempt: using deterministic assignment\n");
+                        }
+                        vector< int > empty;
+                        selected_indices = can_assign_information_columns(real_information_column_weights, max(0, col - num_check_symbols), row_values, empty).second;
+                        if ((int) selected_indices.size() < how_much_bits) {
+                            die("deterministic assignment fails! expected %d, found %d\n", how_much_bits, (int) selected_indices.size());
+                        }
+                        while ((int) selected_indices.size() > how_much_bits) {
+                            selected_indices.pop_back();
+                        }
                     }
 
                     // 5.2.3.2. Correlation heuristics.

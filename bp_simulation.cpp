@@ -117,7 +117,8 @@ int qc_encode(
 
 void independent_validation(matrix< int > const &mx, int tailbite_length, vector< bit > const &codeword) {
     int rows = mx.n_rows(), cols = mx.n_cols();
-    vector< bit > syndrome(rows * tailbite_length);
+	int syndrome_size = rows * tailbite_length;
+    vector< bit > syndrome(syndrome_size);
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
             if (mx(r, c) >= 0) {
@@ -129,7 +130,8 @@ void independent_validation(matrix< int > const &mx, int tailbite_length, vector
             }
         }
     }
-    for (int c = 0; c < cols; ++c) {
+	// fixed bug: c < cols ===> c < syndrome_size
+    for (int c = 0; c < syndrome_size; ++c) {
         if (syndrome[c]) {
             die("Codeword is bad [independent validation]");
         }
@@ -379,6 +381,8 @@ pair<double, double> bp_simulation(
     case IMS_DEC:   out_type = 0;		break;
     case IASP_DEC:  out_type = 1;		break;
 	case TASP_DEC:  out_type = 1;		break;
+	case LMS_DEC:   out_type = 0;		break;
+	case LCHE_DEC:  out_type = 1;		break;
     default: out_type = -1; die("Unknown decoder type: %d", decoder_type); break;
     }
 
@@ -422,21 +426,29 @@ pair<double, double> bp_simulation(
 
     // 3. Generating random codeword.
     vector< bit > codeword;
-#if 1
+	bool zero_codeword = false;
     int codeword_exitcode = random_codeword(code_generating_matrix, tailbite_length, codeword);
     if (codeword_exitcode < 0) {
         // MB: shouldn't we die there?
-        printf("Bad matrix\n");
-        return make_pair(-10.0, -10.0);
+        printf("Bad matrix: zero codeword will be used\n");
+        //return make_pair(-10.0, -10.0);
+		zero_codeword = true;
     } else if (codeword_exitcode > 0) {
         // MB: shouldn't we die there?
-        printf("Bad encoding\n");
-        return make_pair(10.0, 10.0);
+        printf("Bad encoding: zero codeword will be used\n");
+        //return make_pair(10.0, 10.0);
+		zero_codeword = true;
     }
-#else
-	for( i = 0; i < n; i++ )
-		codeword.push_back(0);
-#endif
+
+	if( zero_codeword )
+	{
+		for( i = 0; i < n; i++ )
+			codeword.push_back(0);
+	}
+
+
+	//EUG
+	for( i = 0; i < n; i++ ) codeword[i] = 0;
 
     // 4. Simulation
 	for( i = 0; i < n; i++ )
@@ -520,8 +532,16 @@ pair<double, double> bp_simulation(
 				for( i = pstart; i < pstop; i++ )
 					dec_state->y[i] = init_val;
 			}
+/*
+			for( i = 0; i < n; i++ )
+			{
+				dec_state->y[i] /= 10;
+				if( dec_state->y[i] <= 0 )
+					i = i;
+			}
 
-
+			dec_state->y[] = -0.1;
+*/
             switch( decoder_type )
             {
             case BP_DEC:    iter = bp_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);				 break;
@@ -531,10 +551,12 @@ pair<double, double> bp_simulation(
             case IMS_DEC:   iter = imin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_THR, MS_QBITS, MS_DBITS); break;
             case IASP_DEC:  iter = isum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
 			case TASP_DEC:  iter = tdmp_sum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
+			case LMS_DEC:   iter = lmin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_BETA); break;
+			case LCHE_DEC:  iter = lche_decod( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
             default: iter = -1; die("Unknown decoder type: %d", decoder_type); break;
             }
 
-			if( DEC_DECISION == 0 )
+            if( DEC_DECISION == 0 )
             {
                 for (i = 0; i < n; i++) {
                     if (dec_state->decword[i] != (short)codeword[i]) {
@@ -554,6 +576,8 @@ pair<double, double> bp_simulation(
                 case BP_DEC:
                 case MS_DEC:
                 case IMS_DEC:
+				case LMS_DEC:
+				case LCHE_DEC:
                     for (i = 0; i < n; i++) {
                         if ((dec_state->decword[i] < 0.0) != codeword[i]) {
                             ++curr_nse;

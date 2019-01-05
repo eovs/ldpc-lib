@@ -3,9 +3,14 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 #ifndef SKIP_MEX
 #include <mex.h>
+#endif
+
+#ifndef SKIP_MEX
+#define KEEP_STATISTIC
 #endif
 
 #include "decoders.h"
@@ -19,7 +24,9 @@ char const * const DEC_FULL_NAME[] =
     "Integer Min-Sum",
     "Integer Advanced Sum-Product",
     "FHT Sum-Product",
-    "TDMP Advanced Sum-Product"
+    "TDMP Advanced Sum-Product",
+	"Layered Min-Sum",
+	"Low complexity-high efficiency"
 };
 
 typedef struct  
@@ -28,6 +35,12 @@ typedef struct
 	int pos;
 }ELEMENT;
 
+#define SUM_PROD_GFQ_ORIG
+
+//#define   COLUMN_BY_COLUMN
+
+
+#ifndef SUM_PROD_GFQ_ORIG
 //#define MAP_GRAPH_USE_INT
 //#define MAP_MULT 10//12
 
@@ -39,7 +52,7 @@ typedef struct
 //#define NORM_MAX
 #define NORM_SHIFT
 #define SCALABLE
-
+#endif
 
 #define INP_FPP  16
 #define ONE_INP (1 << INP_FPP)
@@ -57,7 +70,7 @@ typedef struct
 #define ONE_TMP (1 << TMP_FPP)
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#define QMAX  64//256
+#define QMAX  256
 #define RWMAX 64
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -156,6 +169,19 @@ void unpackMatrix_double2short(double m[], int height, int width, short *result[
 }
 
 #endif  //SKIP_MEX
+
+void update_statistics( double *prev_soft, double *curr_soft, double *sign_counter, double *min_abs_llr, double thr, int n )
+{
+	int i;
+	for( i = 0; i < n; i++ )
+	{
+		double val = curr_soft[i] - thr;
+		double absval = val < 0.0 ? -val : val;
+		min_abs_llr[i] = absval < min_abs_llr[i] ? absval : min_abs_llr[i];
+		sign_counter[i] += ((prev_soft[i] - thr) * (curr_soft[i] - thr)) < 0;
+		prev_soft[i] = curr_soft[i];
+	}
+}
 
 
 double** Alloc2d_double( int b, int c )
@@ -322,6 +348,8 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 	case IMS_DEC:
 	case IASP_DEC:
 	case TASP_DEC: 
+	case LMS_DEC:
+	case LCHE_DEC:
 		st->bin_codec = 1;
 		break;
 	case FHT_DEC:
@@ -341,6 +369,12 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 		st->hd = Alloc2d_short( mh, nh );
 		if( st->hd==NULL)
 			return NULL;
+
+#ifdef KEEP_STATISTIC
+		st->sign_counter = (double*)calloc(N, sizeof(st->sign_counter[0]));
+		st->min_abs_llr = (double*)calloc(N, sizeof(st->min_abs_llr[0]));
+		st->prev_soft = (double*)calloc(N, sizeof(st->prev_soft[0]));
+#endif
 	}
 	else
 	{
@@ -638,33 +672,78 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 		if(!st->tasp_tmp )
 			return NULL;
 
-//		st->tasp_p0 = (double*)calloc(M, sizeof( st->tasp_p0[0] ) );
-//		st->tasp_p1 = (double*)calloc(M, sizeof( st->tasp_p1[0] ) );
-//		if(!st->tasp_p0 || !st->tasp_p1 )
-//			return NULL;
+		//		st->tasp_p0 = (double*)calloc(M, sizeof( st->tasp_p0[0] ) );
+		//		st->tasp_p1 = (double*)calloc(M, sizeof( st->tasp_p1[0] ) );
+		//		if(!st->tasp_p0 || !st->tasp_p1 )
+		//			return NULL;
 
 		st->tasp_soft_out = (double*)calloc(N, sizeof(st->tasp_soft_out[0]) );
 		if( !st->tasp_soft_out )
 			return NULL;
 
-//		st->tasp_posh = (int*)calloc(mh, sizeof(st->tasp_posh[0]) );
-//		if( !st->tasp_posh )
-//			return NULL;
+		//		st->tasp_posh = (int*)calloc(mh, sizeof(st->tasp_posh[0]) );
+		//		if( !st->tasp_posh )
+		//			return NULL;
 
-//		st->tasp_rw = (int*)calloc(nh, sizeof(st->tasp_rw[0]) );
-//		if( !st->tasp_rw )
-//			return NULL;
+		//		st->tasp_rw = (int*)calloc(nh, sizeof(st->tasp_rw[0]) );
+		//		if( !st->tasp_rw )
+		//			return NULL;
 
-//		st->tasp_hc_ri = Alloc2d_int( nh, 2 );
-//		if( st->tasp_hc_ri==NULL)
-//			return NULL;
+		//		st->tasp_hc_ri = Alloc2d_int( nh, 2 );
+		//		if( st->tasp_hc_ri==NULL)
+		//			return NULL;
 
-//		st->tasp_state = Alloc2d_double( nh, mh*M );
+		//		st->tasp_state = Alloc2d_double( nh, mh*M );
 		st->tasp_state = Alloc2d_double( mh*M, nh*M );
 		if( st->tasp_state==NULL)
+		break;
+
+	case LMS_DEC:
+		st->lms_soft = (MS_DATA*)calloc(N, sizeof(st->lms_soft[0]) );
+		if( !st->lms_soft )
 			return NULL;
 
-		//st->tasp_all_cw_2 = 0;
+		st->lms_BnNS = (short*)calloc(mh*N, sizeof( st->lms_BnNS[0] ) );
+		if( !st->lms_BnNS )
+			return NULL;
+
+		st->lms_dcs = (MS_DEC_STATE*)calloc(R, sizeof( st->lms_dcs[0] ) );
+		if( !st->lms_dcs )
+			return NULL;
+
+		st->lms_tmps = (MS_DEC_STATE*)calloc(M, sizeof( st->lms_tmps[0] ) );
+		if( !st->lms_tmps )
+			return NULL;
+
+		st->lms_buffer = (MS_DATA*)calloc(M, sizeof(st->lms_buffer[0]) );
+		if( !st->lms_buffer )
+			return NULL;
+
+		st->lms_rbuffer = (MS_DATA*)calloc(M, sizeof(st->lms_rbuffer[0]) );
+		if( !st->lms_rbuffer )
+			return NULL;
+
+		st->lms_rsoft = (MS_DATA*)calloc(M, sizeof(st->lms_rsoft[0]) );
+		if( !st->lms_rsoft )
+			return NULL;
+		break;
+
+	case LCHE_DEC:
+		st->lche_data0 = (double*)calloc(N, sizeof( st->lche_data0[0] ) );
+		if(!st->lche_data0 )
+			return NULL;
+
+		st->lche_tmp = (double*)calloc(nh, sizeof( st->lche_tmp[0] ) );
+		if(!st->lche_tmp )
+			return NULL;
+
+		st->lche_soft_out = (double*)calloc(N, sizeof(st->lche_soft_out[0]) );
+		if( !st->lche_soft_out )
+			return NULL;
+
+		st->lche_state = Alloc2d_double( mh*M, nh*M );
+		if( st->lche_state==NULL)
+			break;
 		break;
 
 	default: return NULL;
@@ -674,6 +753,28 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
     
 }
 
+void check_syndrome( short **matr, int rh, int nh, MS_DATA *soft, MS_DATA *rsoft, int m_ldpc, short *synd )
+{
+	int k, j, n;
+
+	for( j = 0; j < rh; j++ )
+	{
+		int stateOffset = j*m_ldpc;
+
+		for( k = 0; k < nh; k++ )
+		{
+			int circ = matr[j][k];
+
+			if( circ != SKIP )
+			{
+				rotate( &soft[k*m_ldpc], rsoft, circ, sizeof(soft[0]), m_ldpc ); 
+
+				for( n = 0; n < m_ldpc; n++ )
+					synd[stateOffset+n] ^= rsoft[n] < 0;
+			}
+		}
+	}
+}
 
 
 int find_row_weight( short *hb[], int rh, int nh, int rw[] )
@@ -1077,6 +1178,12 @@ void decod_close( DEC_STATE* st )
 		if(st->hd)		{ free2d_short( st->hd );          st->hd       = NULL; }
 		if(st->y)		{ free(st->y);                     st->y        = NULL; }
 		if(st->decword) { free(st->decword);               st->decword  = NULL; }
+
+#ifdef KEEP_STATISTIC
+		if(st->sign_counter)	{ free(st->sign_counter);                     st->sign_counter        = NULL; }
+		if(st->min_abs_llr)		{ free(st->min_abs_llr);                     st->min_abs_llr        = NULL; }
+		if(st->prev_soft)		{ free(st->prev_soft);                     st->prev_soft        = NULL; }
+#endif
 	}
 	else
 	{
@@ -1187,15 +1294,31 @@ void decod_close( DEC_STATE* st )
 	case TASP_DEC:
 		if( st->tasp_data0 )     { free(st->tasp_data0);            st->tasp_data0    = NULL; }
 		if( st->tasp_tmp )     { free(st->tasp_tmp);		        st->tasp_tmp      = NULL; }
-//		if( st->tasp_p0 )        { free(st->tasp_p0);               st->tasp_p0       = NULL; }
-//		if( st->tasp_p1 )        { free(st->tasp_p1);               st->tasp_p1       = NULL; }
+		//		if( st->tasp_p0 )        { free(st->tasp_p0);               st->tasp_p0       = NULL; }
+		//		if( st->tasp_p1 )        { free(st->tasp_p1);               st->tasp_p1       = NULL; }
 		if( st->tasp_soft_out )  { free(st->tasp_soft_out);         st->tasp_soft_out = NULL; }
-//		if( st->tasp_posh )      { free(st->tasp_posh);             st->tasp_posh     = NULL; }
-//		if( st->tasp_rw )        { free(st->tasp_rw);               st->tasp_rw       = NULL; }
+		//		if( st->tasp_posh )      { free(st->tasp_posh);             st->tasp_posh     = NULL; }
+		//		if( st->tasp_rw )        { free(st->tasp_rw);               st->tasp_rw       = NULL; }
 		if( st->tasp_state )     { free2d_double( st->tasp_state ); st->tasp_state    = NULL; }
-//		if( st->tasp_hc_ri )     { free2d_int( st->tasp_hc_ri );    st->tasp_hc_ri    = NULL; }
+		//		if( st->tasp_hc_ri )     { free2d_int( st->tasp_hc_ri );    st->tasp_hc_ri    = NULL; }
 		break;
 
+	case LMS_DEC:
+		if( st->lms_soft )    { free(st->lms_soft);    st->lms_soft    = NULL; }
+		if( st->lms_BnNS )    { free(st->lms_BnNS);    st->lms_BnNS    = NULL; }
+		if( st->lms_dcs )     { free(st->lms_dcs);     st->lms_dcs     = NULL; }
+		if( st->lms_tmps )    { free(st->lms_tmps);    st->lms_tmps    = NULL; }
+		if( st->lms_buffer )  { free(st->lms_buffer);  st->lms_buffer  = NULL; }
+		if( st->lms_rbuffer ) { free(st->lms_rbuffer); st->lms_rbuffer = NULL; }
+		if( st->lms_rsoft )   { free(st->lms_rsoft);   st->lms_rsoft   = NULL; }
+		break;
+
+	case LCHE_DEC:
+		if( st->lche_data0 )     { free(st->lche_data0);            st->lche_data0    = NULL; }
+		if( st->lche_tmp )     { free(st->lche_tmp);		        st->lche_tmp      = NULL; }
+		if( st->lche_soft_out )  { free(st->lche_soft_out);         st->lche_soft_out = NULL; }
+		if( st->lche_state )     { free2d_double( st->lche_state ); st->lche_state    = NULL; }
+		break;
 	default:;
 	}
 
@@ -1416,7 +1539,7 @@ int bp_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter,
 	return -iter;
 }   // bp
 
-
+#define SP_THR 1.0 //0.5
 int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision )    
 {
 	int nh = st->nh;
@@ -1474,7 +1597,7 @@ int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 				rotate( &soft[pos_n], data, circ, sizeof(data[0]), m );
 
 				for( k = 0; k < m; k++ )
-					syndr[pos_r + k] ^= data[k] < 0.5;
+					syndr[pos_r + k] ^= data[k] < SP_THR;
 			}
 		}
 	}
@@ -1493,7 +1616,7 @@ int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 		else
 		{
 			for( i = 0; i < Ncode; i++ ) 
-				decword[i] = soft[i] < 0.5;
+				decword[i] = soft[i] < SP_THR;
 		}
 		return 0;// no errors detected
 	}
@@ -1634,7 +1757,7 @@ int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 					rotate( &soft[pos_n], data, circ, sizeof(data[0]), m );
 
 					for( k = 0; k < m; k++ )
-						syndr[pos_r + k] ^= data[k] < 0.5;
+						syndr[pos_r + k] ^= data[k] < SP_THR;
 				}
 			}
 
@@ -1655,7 +1778,7 @@ int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 			else
 			{
 				for( i = 0; i < Ncode; i++ ) 
-					decword[i] = soft[i] < 0.5;
+					decword[i] = soft[i] < SP_THR;
 			}
 
 			iter++;
@@ -1675,7 +1798,7 @@ int sum_prod_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 	else
 	{
 		for( i = 0; i < Ncode; i++ ) 
-			decword[i] = soft[i] < 0.5;
+			decword[i] = soft[i] < SP_THR;
 	}
 
 	return -iter;
@@ -1768,7 +1891,7 @@ void imap_bin( ui16 soft[], int rw, int step)
 }
 
 
-int check_syndrome( short *syndr, int r, short **hd, int rh, int nh, int m, double *soft, double *buf, double thr )
+int check_syndrome_thr( short *syndr, int r, short **hd, int rh, int nh, int m, double *soft, double *buf, double thr )
 {
 	int synd;
 	int i, j, k;
@@ -1854,6 +1977,7 @@ int sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], in
 		soft[i] = e1 / (e0 + e1 );
 	}
 
+
 	for( j = 0; j < rh; j++ )
 	{
 		int cnt = 0;
@@ -1878,8 +2002,14 @@ int sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], in
 	for( i = 0; i < n; i++ )
 		soft_out[i] = soft[i];
 
+#ifdef KEEP_STATISTIC
+	for( i = 0; i < n; i++ ) st->prev_soft[i] = soft_out[i];
+	for( i = 0; i < n; i++ ) st->sign_counter[i] = 0;
+	for( i = 0; i < n; i++ ) st->min_abs_llr[i]  = 10000;
+#endif
+
 	// check input codeword
-	synd = check_syndrome( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
+	synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
 
 	if( synd == 0 ) 
 	{
@@ -1896,8 +2026,25 @@ int sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], in
 		for( i = 0; i < rh; i++ ) 
 		{
 			// decode constituent code of each row
+/*
+			if( rw[i] == 1 )
+			{
+				for( k = 0; k < m; k++ )	state[0][i*m+k] = 0.5;			
+				continue;
+			}
+*/
 			for( k = 0; k < m; k++ )
+			{
+#if 0
+				static double tmp[1024];
+				int idx;
+				for( idx = 0; idx < rw[i]; idx++ )	tmp[idx] = state[idx][i*m+k];
+				map_bin( tmp, rw[i], 1 );
+				for( idx = 0; idx < rw[i]; idx++ )	state[idx][i*m+k] = tmp[idx];
+#else
 				map_bin( &state[0][i*m+k],rw[i], r );
+#endif
+			}
 		}
 
 
@@ -2031,8 +2178,12 @@ int sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], in
 			}
 		}   
 
+#ifdef KEEP_STATISTIC
+		update_statistics( st->prev_soft, soft_out, st->sign_counter, st->min_abs_llr, 0.5, n );
+#endif
+
 		//check syndrome
-		synd = check_syndrome( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
+		synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
 
 		if( synd == 0 ) 
 		{
@@ -2051,7 +2202,7 @@ int sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], in
 
 
 int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxsteps, int decision )
-{ 
+ { 
 	int i, j, k;
 	int steps;
 	short **hd = st->hd;
@@ -2066,6 +2217,7 @@ int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[
 	double T = 0.0001;//1e-5;
 	double TT = 0;
 	double *y = st->tasp_tmp;
+	
 
 	int synd;
 
@@ -2085,11 +2237,11 @@ int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[
 		soft[i] = e1 / (e0 + e1 );
 	}
 	
-
 	for( j = 0; j < rh; j++ )
 	{
 		int pos_r  = j * m;
 		int cnt;
+
 
 		cnt = 0;
 		for( i = 0; i < nh; i++ )
@@ -2113,7 +2265,12 @@ int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[
 	for( i = 0; i < n; i++ )
 		soft_out[i] = soft[i];
 
-	synd = check_syndrome( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
+#ifdef KEEP_STATISTIC
+	for( i = 0; i < n; i++ ) st->prev_soft[i] = soft_out[i];
+	for( i = 0; i < n; i++ ) st->sign_counter[i] = 0;
+	for( i = 0; i < n; i++ ) st->min_abs_llr[i]  = 10000;
+#endif
+	synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
 	if( synd == 0 )
 	{
 		for( i = 0; i < n; i++ )
@@ -2183,9 +2340,13 @@ int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[
 				}
 			}
 
-			synd = check_syndrome( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
+			synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
 		}
 
+#ifdef KEEP_STATISTIC
+		update_statistics( st->prev_soft, soft_out, st->sign_counter, st->min_abs_llr, 0.5, n );
+#endif
+//		synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
 
 		steps = steps+1;
 
@@ -2201,6 +2362,275 @@ int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[
 	
 	return steps;
 }
+
+MS_DATA logexp( MS_DATA x )
+{
+	const double A[] = {-0.7719, -0.2723, -0.0997, -.0366, -0.0135, -0.0050, -0.0018, -0.0007, -0.0002, -0.0001};
+	double T2 = 1.0/512;
+	double T3 = 10; 
+	double T4 = 1;
+	MS_DATA y;
+
+	if( x > T3 ) x = T3;
+//	if( x < T2 ) x = T2;
+	if( x > T4 )
+	{
+		int idx = (int)floor(x + 0.5);
+		y = A[idx-1];
+	}
+
+	if( x <= T4 )
+	{ 
+//		double tmp = log(x/2.0);
+//		double tmp1 = tmp*4;
+//		double tmp2 = floor(tmp1);
+//		double tmp3 = tmp1 / 4.0;
+		y = floor( log(x/2.0)*4.0 ) / 4.0;
+	}
+
+	if( x > T3 ) y = 0;
+	if( x < T2 ) y = -8;
+
+	return y;
+}
+
+static inline MS_DATA logexp_int( MS_DATA x )
+{
+	static double A[] = 
+	{	
+		1.41e+00, 7.72e-01, 4.54e-01, 2.72e-01, 1.65e-01, 9.97e-02, 6.04e-02, 3.66e-02, 
+		2.22e-02, 1.35e-02, 8.17e-03, 4.96e-03, 3.01e-03, 1.82e-03, 1.11e-03, 6.71e-04,
+		4.07e-04, 2.47e-04, 1.50e-04, 9.08e-05, 5.51e-05, 3.34e-05, 2.03e-05, 1.23e-05, 
+		7.45e-06, 4.52e-06, 2.74e-06, 1.66e-06, 1.01e-06, 6.12e-07, 3.71e-07, 2.25e-07
+	};
+
+	static double B[] = 
+	{
+		3.47, 2.77, 2.37, 2.08, 1.86, 1.69, 1.54, 1.41,
+		1.29, 1.19, 1.11, 1.03, 0.95, 0.89, 0.83, 0.77,
+		0.72, 0.67, 0.63, 0.59, 0.55, 0.52, 0.48, 0.45,
+		0.43, 0.40, 0.37, 0.35, 0.33, 0.31, 0.29, 0.27
+	};
+
+	static double C[] =
+	{
+		/*
+		6.24, 5.55, 5.14, 4.85, 4.63, 4.45, 4.29, 4.16,
+		4.04, 3.94, 3.84, 3.75, 3.67, 3.60, 3.53, 3.47,  
+		3.41, 3.35, 3.29, 3.24, 3.19, 3.15, 3.10, 3.06, 
+		3.02, 2.98, 2.94, 2.91, 2.87, 2.84, 2.81, 2.77
+		*/
+		6.93, 6.24, 5.83, 5.55, 5.32, 5.14, 4.99, 4.85,
+		4.73, 4.63, 4.53, 4.45, 4.37, 4.29, 4.22, 4.16,
+		4.10, 4.04, 3.99, 3.94, 3.89, 3.84, 3.80, 3.75,
+		3.71, 3.67, 3.64, 3.60, 3.56, 3.53, 3.50, 3.47
+	};
+
+//	if( x < 1.0/256.0 ) 
+//		return -C[0];
+
+    if( x <= 0 ) x = 1.0/4096.0;
+	if( x > 16.0 ) x = 16.0;
+
+	if( x >= 2.0 )
+		return  -A[(int)(2*x + 0.5) - 1]; 
+	else
+		if( x > 1.0/16.0 )
+			return -B[(int)(16*x + 0.5) - 1];
+		else
+			if( x > 1.0/512.0 )
+				return -C[(int)(512*x + 0.5) - 1];
+			else  
+			{
+				//return -C[(int)(512*x + 0.5) - 1];
+
+                double s = 0;
+				while( x < 1.0/512.0 )
+				{
+					x *= 32;
+					s -= 3.46;
+				}
+
+				return s-C[(int)(512*x + 0.5) - 1];
+			}
+}
+void map_bin_llr(MS_DATA y[], int n )
+{
+	int i;
+	static int hard[1024];
+	static MS_DATA ay[1024];
+	static MS_DATA alogpy[1024];
+	static MS_DATA a[1024];
+	static MS_DATA A[1024];
+	int synd;
+	MS_DATA sum;
+/*
+	y[0] = -3;
+	y[1] = 14.08;
+	y[2] = 11.14;
+	y[3] = 8.21;
+	y[4] = 14.98;
+	y[5] = 8.32;
+	y[6] = 9.96;
+	y[7] = 15.03;
+	n=8;
+*/
+	for( i = 0; i < n; i++ )
+	{
+		hard[i] = y[i] < 0;
+	}	
+	
+	synd = 0;
+	for( i = 0; i < n; i++ )
+		synd ^=hard[i];
+
+	for( i = 0; i < n; i++ )
+		hard[i] ^= synd;
+
+	for( i = 0; i < n; i++ )
+		ay[i] = y[i] < 0.0 ? -y[i] : y[i];
+	
+	for( i = 0; i < n; i++ )
+		alogpy[i] = logexp_int( ay[i] );
+
+	sum = 0;
+	for( i = 0; i < n; i++ )
+		sum += alogpy[i];
+
+	for( i = 0; i < n; i++ )
+	{
+		A[i] = alogpy[i] - sum;
+	}
+
+	for( i = 0; i < n; i++ )
+		a[i] = logexp_int( A[i] );
+
+	for( i = 0; i < n; i++ )
+		y[i] = (2 * hard[i] - 1) * a[i];
+}
+
+
+int lche_decod( DEC_STATE* st, double soft[], double decword[], int maxsteps, int decision )
+{ 
+	int i, j, k;
+	int steps;
+	short **hd = st->hd;
+	double **Z = st->lche_state;
+	double *soft_out = st->lche_soft_out;
+	short *syndr    = st->syndr;
+	double *data0 = st->lche_data0;
+	double *u = st->lche_data0;
+	double *y = st->lche_tmp;
+	int synd;
+
+	int rh = st->rh;
+	int nh = st->nh;
+	int m  = st->m;
+	int r = rh * m;
+	int n = nh * m;
+
+
+	for( i = 0; i < r; i++ )
+		for(j = 0; j < n; j++ )
+			Z[i][j] = 0.0;
+
+	// just to compute syndrome before iterations
+	for( i = 0; i < n; i++ )
+		soft_out[i] = soft[i];
+
+#ifdef KEEP_STATISTIC
+	for( i = 0; i < n; i++ ) st->prev_soft[i] = soft_out[i];
+	for( i = 0; i < n; i++ ) st->sign_counter[i] = 0;
+	for( i = 0; i < n; i++ ) st->min_abs_llr[i]  = 10000;
+#endif
+
+	memset( syndr, 0, r * sizeof(syndr[0]) );
+	check_syndrome( hd, rh, nh, soft_out, data0, m, syndr );
+
+	synd = 0;
+	for( i = 0; i < r; i++ )	synd |= syndr[i];
+	if( synd == 0 )
+	{
+		for( i = 0; i < n; i++ )
+			decword[i] = soft_out[i] < 0;
+
+		return 0;
+	}
+
+	steps = 0; // number of iterations
+	while( steps < maxsteps )
+	{
+		//	START ITERATIONS
+
+		for( i = 0; i < rh; i++ )	//loop over checks
+		{
+			int cnt;
+
+			for( k = 0; k < m; k++ )
+			{
+				double *a = Z[i * m + k];
+
+				cnt = 0;
+				for( j = 0; j < nh; j++ )
+				{
+					int circ = hd[i][j];
+
+					if( circ != -1 )
+					{
+						int idx = j * m + ((k + circ) % m);
+
+						u[cnt] = y[cnt] = soft_out[idx] - a[idx];
+
+						cnt++;
+					}
+				}
+
+				map_bin_llr( u, cnt );
+
+				cnt = 0;
+				for( j = 0; j < nh; j++ )
+				{
+					int circ = hd[i][j];
+
+					if( circ != -1 )
+					{
+						int idx = j * m + ((k + circ) % m);
+
+						soft_out[idx] = u[cnt] + y[cnt];
+						a[idx] = u[cnt];
+						cnt++;
+					}
+				}
+			}
+		}
+
+#ifdef KEEP_STATISTIC
+		update_statistics( st->prev_soft, soft_out, st->sign_counter, st->min_abs_llr, 0.5, n );
+#endif
+		//		synd = check_syndrome_thr( syndr, r, hd, rh, nh, m, soft_out, data0, 0.5 );
+
+		steps = steps+1;
+
+		memset( syndr, 0, r * sizeof(syndr[0]) );
+		check_syndrome( hd, rh, nh, soft_out, data0, m, syndr );
+		synd = 0;
+		for( i = 0; i < r; i++ )	synd |= syndr[i];
+
+		if( synd == 0 ) 
+			break;
+	}
+
+	for( i = 0; i < n; i++ )
+		decword[i] = soft_out[i] < 0.0;
+
+	if( synd == 1 )
+		steps = -steps;  // errors detected but not corrected
+
+	return steps;
+}
+
+
+
 
 #ifndef IASP_FIXED_POINT
 
@@ -3957,6 +4387,665 @@ int min_sum_decod_qc_lm( DEC_STATE* st, double y[], double decword[], int maxste
 }
 #endif
 
+#ifndef MS_MUL_CORRECTION
+int min_sum_decod_qc_lm( DEC_STATE* st, double y[], double decword[], int maxsteps, int decision, double alpha )
+{
+	int   i, j, k, n;
+	int iter;
+	int parity;
+	short **matr       = st->hd;
+	short *synd        = st->syndr; 
+	MS_DATA *soft      = st->ms_soft;
+	short *BnNS        = st->ms_BnNS;  
+	MS_DATA *buffer    = st->ms_buffer;
+	MS_DATA *rbuffer   = st->ms_rbuffer;
+	MS_DATA *rsoft     = st->ms_rsoft;
+	MS_DEC_STATE *dcs  = st->ms_dcs;		
+	MS_DEC_STATE *tmps = st->ms_tmps;		
+
+
+	int m  = st->m;
+	int rh = st->rh;
+	int nh = st->nh;
+	
+	int c_ldpc = m;
+	int r_ldpc = m * rh;
+	int n_ldpc = m * nh;
+
+
+	for( i = 0; i < r_ldpc; i++ )
+	{
+		dcs[i].min1 = 0;
+		dcs[i].min2 = 0;
+		dcs[i].pos  = 0;
+		dcs[i].sign = 0;
+	}
+/*	
+	for( i = 0; i < n_ldpc; i++ )
+	{
+		double val = abs(y[i]) * 4;
+		int sign = y[i] < 0;
+		val = (int)(val + 0.5);
+		y[i] = sign ? -val : val;
+	}
+*/
+
+    {
+        double coef;
+        double en = 0.0;
+  
+        for( i = 0; i < n_ldpc; i++ )
+            en += y[i] * y[i];
+        
+        coef = sqrt( n_ldpc / en );
+        for( i = 0; i < n_ldpc; i++ )
+            y[i] = y[i] * coef;
+    }   
+    
+    memset( BnNS, 0, rh*n_ldpc*sizeof(BnNS[0]) );
+
+
+
+
+	// check input codeword
+	for( j = 0; j < rh; j++ )
+	{
+		for( i = 0; i < nh; i++ ) 
+		{
+			int pos_r = j * m;
+			int pos_n = i * m;
+			int circ = matr[j][i];
+
+			if( circ != - 1 )
+			{
+				rotate( &y[pos_n], rsoft, circ, sizeof(y[0]), m );
+
+				for( k = 0; k < m; k++ )
+					synd[pos_r + k] ^= rsoft[k] < 0;
+			}
+		}
+	}
+
+	parity = 0;
+	for( i = 0; i < r_ldpc; i++ )
+		parity |= synd[i];
+
+
+	for( iter = 0; iter < maxsteps; iter++ )
+	{
+
+		int memOffset;
+
+
+		// INIT_STAGE
+		memset( synd, 0, r_ldpc*sizeof(synd[0]) );
+		memset( soft, 0, n_ldpc*sizeof(soft[0]) );
+		memOffset = 0;
+
+		// STATE 1: compute sum
+		for( j = 0; j < rh; j++ ) 
+		{
+			int stateOffset = j*c_ldpc;
+
+			for( k = 0; k < nh; k++ )
+			{
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					for( n = 0; n < c_ldpc; n++ )
+					{
+						MS_DATA tmp = dcs[stateOffset+n].pos == k ? dcs[stateOffset+n].min2 : dcs[stateOffset+n].min1;
+
+                        tmp -= alpha;
+                        if( tmp < 0 )
+                            tmp = 0;
+                        
+						buffer[n] = (BnNS[memOffset+n] ^ dcs[stateOffset+n].sign) ? -tmp : tmp;
+					}
+
+					rotate( buffer, rbuffer, c_ldpc - circ, sizeof(buffer[0]), c_ldpc ); 
+
+					for( n = 0; n < c_ldpc; n++ )
+					{
+						MS_DATA t = soft[k * c_ldpc + n] + rbuffer[n];
+						soft[k * c_ldpc + n] = t;//limit_val( t, MAX_VAL );
+					}
+
+				}
+
+				memOffset += c_ldpc;
+			}
+
+		} 
+
+		// STATE 2: 
+		if( decision )
+		{
+			for( k = 0; k < n_ldpc; k++ )
+			{
+				soft[k] = y[k] + soft[k];
+				decword[k] = soft[k];
+			}
+		}
+		else
+		{
+			for( k = 0; k < n_ldpc; k++ )
+			{
+				soft[k] = y[k] + soft[k];
+				decword[k] = soft[k] < 0;
+			}
+		}
+
+
+		// STATE 3: update statistic
+		memOffset = 0;
+		for( j = 0; j < rh; j++ )
+		{
+			int stateOffset = j*c_ldpc;
+
+			for( k = 0; k < c_ldpc; k++ )
+			{
+				tmps[k].min1 = MAX_VAL;
+				tmps[k].min2 = MAX_VAL;
+				tmps[k].pos  = 0;
+				tmps[k].sign = 0;
+			}
+
+			for( k = 0; k < nh; k++ )
+			{
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					rotate( &soft[k*c_ldpc], rsoft, circ, sizeof(soft[0]), c_ldpc ); 
+
+					for( n = 0; n < c_ldpc; n++ )
+						synd[stateOffset+n] ^= rsoft[n] < 0;
+
+					for( n = 0; n < c_ldpc; n++ )
+                    {
+                        MS_DATA tmp = dcs[stateOffset+n].pos == k ? dcs[stateOffset+n].min2 : dcs[stateOffset+n].min1;
+                        
+                        tmp -= alpha;
+                        if( tmp < 0 )
+                            tmp = 0;
+                        
+						buffer[n] = tmp;
+                    }
+
+					for( n = 0; n < c_ldpc; n++ )
+					{
+						short sign = BnNS[memOffset+n] ^ dcs[stateOffset+n].sign;
+						MS_DATA val  = buffer[n];// * alpha;
+						MS_DATA t    = (BnNS[memOffset+n] ^ dcs[stateOffset+n].sign) ? -val : val;
+
+						t  = rsoft[n] - t;
+
+						sign = t < 0;
+						BnNS[memOffset+n] = sign;
+						tmps[n].sign ^= sign;
+
+//						val = abs( t );	// incorrect for double t
+						val = t < 0.0 ? -t : t;
+						val = (val > MAX_VAL) ? MAX_VAL : val;
+
+
+						if( val < tmps[n].min1 )      
+						{
+							tmps[n].pos = k;
+							tmps[n].min2 = tmps[n].min1; 
+							tmps[n].min1 = val;
+						}
+						else
+						{
+							if( val < tmps[n].min2 )
+								tmps[n].min2 = val;
+						}
+
+					}  
+				}
+
+
+				memOffset += c_ldpc;
+			}
+
+			for( k = 0; k < c_ldpc; k++ )
+				dcs[stateOffset+k] = tmps[k];
+
+		}
+
+		for( parity = 0, i = 0; i < r_ldpc; i++ )
+			parity |= synd[i];
+
+
+		if( parity == 0 )
+			break; 
+
+	} // stage
+
+	return parity ? -iter : iter+1; 
+}
+
+#else
+
+void process_check_node( MS_DEC_STATE *curr, short curr_v2c_sign, MS_DATA abs_curr_v2c, int index )
+{
+	curr->sign ^= curr_v2c_sign;
+
+	if( abs_curr_v2c < curr->min1 )      
+	{
+		curr->pos = index;
+		curr->min2 = curr->min1; 
+		curr->min1 = abs_curr_v2c;
+	}
+	else
+	{
+		if( abs_curr_v2c < curr->min2 )
+			curr->min2 = abs_curr_v2c;
+	}
+}
+
+#define MY_VERSION
+//#define ALPHA 0.8
+//#define BETA  0.35 
+
+#define ALPHA 1.0
+#define BETA  0.4
+
+MS_DATA	get_c2v_val( short sign, int pos, MS_DEC_STATE *stat, double alpha, double beta )
+{
+	MS_DATA c2v_abs  = stat->pos == pos ? stat->min2 : stat->min1;
+
+	c2v_abs  = c2v_abs * alpha - beta; 
+	if( c2v_abs < 0 )
+		c2v_abs = 0;
+
+	return sign ? -c2v_abs : c2v_abs;
+}
+
+double beta_control( MS_DEC_STATE *state )
+{
+	double beta = 0.4;
+#if 0
+
+//	if( state->min2 > state->min1 * 1.1 )	beta = 0.4;
+//	if( state->min2 > state->min1 * 1.2 )	beta = 0.7;
+
+
+	//if( state->min2 - state->min1 > 0.1 )	beta = 0.6;
+	if( state->min2 - state->min1 > 0.2 )	beta = 0.70;
+	if( state->min2 - state->min1 > 0.5 )	beta = 0.75;
+	
+#endif
+	return beta;
+}
+
+int lmin_sum_decod_qc_lm( DEC_STATE* st, double y[], double decword[], int maxsteps, int decision, double alpha, double beta )
+{
+	int   i, j, k, n;
+	int iter;
+	int parity;
+	short **matr       = st->hd;
+	short *synd        = st->syndr; 
+	MS_DATA *soft      = st->lms_soft;
+	short *signs       = st->lms_BnNS;  
+	MS_DATA *buffer    = st->lms_buffer;
+	MS_DATA *rbuffer   = st->lms_rbuffer;
+	MS_DATA *rsoft     = st->lms_rsoft;
+	MS_DEC_STATE *prev = st->lms_dcs;		
+	MS_DEC_STATE *curr = st->lms_tmps;		
+
+
+	int m  = st->m;
+	int rh = st->rh;
+	int nh = st->nh;
+	
+	int m_ldpc = m;
+	int r_ldpc = m * rh;
+	int n_ldpc = m * nh;
+
+	for( i = 0; i < n_ldpc; i++ )
+		soft[i] = y[i];
+
+	for( i = 0; i < r_ldpc; i++ )
+	{
+		prev[i].min1 = 0;
+		prev[i].min2 = 0;
+		prev[i].pos  = 0;
+		prev[i].sign = 0;
+	}
+
+
+#ifdef KEEP_STATISTIC
+	for( i = 0; i < n_ldpc; i++ ) st->prev_soft[i] = soft[i];
+	for( i = 0; i < n_ldpc; i++ ) st->sign_counter[i] = 0;
+	for( i = 0; i < n_ldpc; i++ ) st->min_abs_llr[i]  = 10000;
+#endif
+
+#if 01
+
+	memset( signs, 0, rh*n_ldpc*sizeof(signs[0]) );
+
+	// check input codeword
+	memset( synd, 0, r_ldpc*sizeof(synd[0]) );
+	check_syndrome( matr, rh, nh, soft, rsoft, m_ldpc, synd );  
+
+	parity = 0;
+	for( i = 0; i < r_ldpc; i++ )	parity |= synd[i];
+
+	for( iter = 0; iter < maxsteps; iter++ )
+	{
+		if( parity == 0 )
+			break; 
+
+		// INIT_STAGE
+		memset( synd, 0, r_ldpc*sizeof(synd[0]) );
+
+		// update statistic
+		for( j = 0; j < rh; j++ )
+		{
+			MS_DATA *prev_c2v_abs = buffer;
+			int stateOffset = j*m_ldpc;
+
+			for( k = 0; k < m_ldpc; k++ )
+			{
+				curr[k].min1 = MAX_VAL;
+				curr[k].min2 = MAX_VAL;
+				curr[k].pos  = 0;
+				curr[k].sign = 0;
+			}
+
+
+#ifdef MY_VERSION
+			for( k = 0; k < nh; k++ )
+			{
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				MS_DATA *curr_soft    = &soft[k * m_ldpc];
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					rotate( &soft[k*m_ldpc], rsoft, circ, sizeof(soft[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+						prev_c2v_abs[n] = prev[stateOffset+n].pos == k ? prev[stateOffset+n].min2 : prev[stateOffset+n].min1;
+
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						short	prev_c2v_sgn  = signs[memOffset+n] ^ prev[stateOffset+n].sign;
+						MS_DATA	prev_c2v_val  = prev_c2v_sgn ? -prev_c2v_abs[n] : prev_c2v_abs[n];
+						MS_DATA curr_v2c_val  = rsoft[n] - prev_c2v_val;
+#if 0
+						short	curr_v2c_sgn = curr_v2c_val < 0;
+						MS_DATA curr_v2c_abs  = (curr_v2c_val < 0.0 ? -curr_v2c_val : curr_v2c_val) * alpha; //scaling 
+#else
+						const MS_DATA beta = 0.4;
+						short	curr_v2c_sgn = curr_v2c_val < 0;
+						MS_DATA curr_v2c_abs = (curr_v2c_val < 0.0 ? -curr_v2c_val : curr_v2c_val); //shifting 
+						curr_v2c_abs -= beta;
+						//curr_v2c_sgn = curr_v2c_abs < 0 ? 0 : curr_v2c_sgn;
+						curr_v2c_abs = curr_v2c_abs < 0 ? 0 : curr_v2c_abs;
+#endif
+						/*curr_v2c*/curr_soft[n] = curr_v2c_val;
+						signs[memOffset+n] = curr_v2c_sgn;
+
+						process_check_node( &curr[n], curr_v2c_sgn, curr_v2c_abs, k );
+
+					}  
+				}
+			}
+
+			for( k = 0; k < m_ldpc; k++ )
+				prev[stateOffset+k] = curr[k];
+
+			for( k = 0; k < nh; k++ )
+			{
+				MS_DATA *curr_c2v_val = buffer;
+				MS_DATA *curr_soft    = &soft[k * m_ldpc];
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						MS_DATA curr_c2v_abs = prev[stateOffset+n].pos == k ? prev[stateOffset+n].min2 : prev[stateOffset+n].min1;
+
+						curr_c2v_val[n] = (signs[memOffset+n] ^ prev[stateOffset+n].sign) ? -curr_c2v_abs : curr_c2v_abs;
+					}
+
+					for( n = 0; n < m_ldpc; n++ )
+						buffer[n] = /*curr_v2c*/curr_soft[n] + curr_c2v_val[n];
+
+					rotate( buffer, rbuffer, m_ldpc - circ, sizeof(curr_c2v_val[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+						curr_soft[n] = rbuffer[n];
+
+				}
+			}
+#else
+			for( k = 0; k < nh; k++ )
+			{
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				MS_DATA *curr_soft    = &soft[k * m_ldpc];
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					rotate( &soft[k*m_ldpc], rsoft, circ, sizeof(soft[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						short	prev_c2v_sgn  = signs[memOffset+n] ^ prev[stateOffset+n].sign;
+#if 0
+						MS_DATA	prev_c2v_val  = get_c2v_val( prev_c2v_sgn, k, &prev[stateOffset+n], 1.0/*alpha*/, beta );
+#else
+						MS_DATA beta          = beta_control( &prev[stateOffset+n] );
+						MS_DATA	prev_c2v_val  = get_c2v_val( prev_c2v_sgn, k, &prev[stateOffset+n], 1.0/*alpha*/, beta );
+#endif					
+						MS_DATA curr_v2c_val  = rsoft[n] - prev_c2v_val;
+						short	curr_v2c_sgn = curr_v2c_val < 0;
+						MS_DATA curr_v2c_abs = (curr_v2c_val < 0.0 ? -curr_v2c_val : curr_v2c_val); 
+
+						curr_soft[n]       = curr_v2c_val;
+						signs[memOffset+n] = curr_v2c_sgn;
+
+						process_check_node( &curr[n], curr_v2c_sgn, curr_v2c_abs, k );
+					}  
+				}
+			}
+
+			for( k = 0; k < m_ldpc; k++ )
+				prev[stateOffset+k] = curr[k];
+
+			for( k = 0; k < nh; k++ )
+			{
+				MS_DATA *curr_c2v_val = buffer;
+				MS_DATA *curr_soft    = &soft[k * m_ldpc];
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						short curr_c2v_sgn  = signs[memOffset+n] ^ prev[stateOffset+n].sign;
+#if 0
+						curr_c2v_val[n]  = get_c2v_val( curr_c2v_sgn, k, &prev[stateOffset+n], 1.0/*alpha*/, beta );
+#else
+						MS_DATA beta     = beta_control( &prev[stateOffset+n] );
+						curr_c2v_val[n]  = get_c2v_val( curr_c2v_sgn, k, &prev[stateOffset+n], 1.0/*alpha*/, beta );
+#endif					
+					}
+
+					for( n = 0; n < m_ldpc; n++ )
+						buffer[n] = curr_soft[n] + curr_c2v_val[n];
+
+					rotate( buffer, rbuffer, m_ldpc - circ, sizeof(curr_c2v_val[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+						curr_soft[n] = rbuffer[n];
+
+				}
+			}
+#endif
+		} 
+
+#ifdef KEEP_STATISTIC
+		update_statistics( st->prev_soft, soft, st->sign_counter, st->min_abs_llr, 0.0, n_ldpc );
+#endif
+
+		// check syndrome
+		check_syndrome( matr, rh, nh, soft, rsoft, m_ldpc, synd );  
+
+		for( parity = 0, i = 0; i < r_ldpc; i++ )
+			parity |= synd[i];
+
+
+		if( parity == 0 )
+			break; 
+
+	} // stage
+#else
+	memset( signs, 0, rh*n_ldpc*sizeof(signs[0]) );
+
+	// check input codeword
+	memset( synd, 0, r_ldpc*sizeof(synd[0]) );
+	check_syndrome( matr, rh, nh, soft, rsoft, m_ldpc, synd );  
+
+	parity = 0;
+	for( i = 0; i < r_ldpc; i++ )
+		parity |= synd[i];
+
+	for( iter = 0; iter < maxsteps; iter++ )
+	{
+		if( parity == 0 )
+			break; 
+
+		// INIT_STAGE
+		memset( synd, 0, r_ldpc*sizeof(synd[0]) );
+	
+		// update statistic
+		for( j = 0; j < rh; j++ )
+		{
+			int stateOffset = j*m_ldpc;
+
+			for( k = 0; k < m_ldpc; k++ )
+			{
+				curr[k].min1 = MAX_VAL;
+				curr[k].min2 = MAX_VAL;
+				curr[k].pos  = 0;
+				curr[k].sign = 0;
+			}
+
+			for( k = 0; k < nh; k++ )
+			{
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					rotate( &soft[k*m_ldpc], rsoft, circ, sizeof(soft[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+						buffer[n] = prev[stateOffset+n].pos == k ? prev[stateOffset+n].min2 : prev[stateOffset+n].min1;
+
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						short	prev_c2v_sgn = signs[memOffset+n] ^ prev[stateOffset+n].sign;
+						MS_DATA	prev_c2v_val = prev_c2v_sgn ? -buffer[n] : buffer[n];
+						MS_DATA curr_v2c_val = rsoft[n] - prev_c2v_val;
+#if 0
+						short	curr_v2c_sgn = curr_v2c_val < 0;
+						MS_DATA curr_v2c_abs = (curr_v2c_val < 0.0 ? -curr_v2c_val : curr_v2c_val) * alpha; //scaling 
+#else
+						const MS_DATA beta = 0.4;
+						short	curr_v2c_sgn = curr_v2c_val < 0;
+						MS_DATA curr_v2c_abs  = (curr_v2c_val < 0.0 ? -curr_v2c_val : curr_v2c_val); //shifting 
+						curr_v2c_abs -= beta;
+						if( curr_v2c_abs < 0 )
+						{
+							curr_v2c_abs = 0;
+							curr_v2c_sgn = 0;
+						}
+#endif
+						signs[memOffset+n] = curr_v2c_sgn;
+
+						process_check_node( &curr[n], curr_v2c_sgn, curr_v2c_abs, k );
+					}  
+				}
+
+				memOffset += m_ldpc;
+			}
+
+			for( k = 0; k < m_ldpc; k++ )
+				prev[stateOffset+k] = curr[k];
+		}
+
+		for( k = 0; k < n_ldpc; k++ )
+			soft[k] = y[k];
+		
+		// STATE: compute soft output
+		for( j = 0; j < rh; j++ ) 
+		{
+			int stateOffset = j*m_ldpc;
+			for( k = 0; k < nh; k++ )
+			{
+				int memOffset = j * n_ldpc + k * m_ldpc;
+				int circ = matr[j][k];
+
+				if( circ != SKIP )
+				{
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						MS_DATA tmp = prev[stateOffset+n].pos == k ? prev[stateOffset+n].min2 : prev[stateOffset+n].min1;
+
+						buffer[n] = (signs[memOffset+n] ^ prev[stateOffset+n].sign) ? -tmp : tmp;
+					}
+
+					rotate( buffer, rbuffer, m_ldpc - circ, sizeof(buffer[0]), m_ldpc ); 
+
+					for( n = 0; n < m_ldpc; n++ )
+					{
+						soft[k * m_ldpc + n] = soft[k * m_ldpc + n] + rbuffer[n];
+					}
+
+				}
+			}
+		} 
+
+		// check syndrome
+		check_syndrome( matr, rh, nh, soft, rsoft, m_ldpc, synd );  
+
+		for( parity = 0, i = 0; i < r_ldpc; i++ )
+			parity |= synd[i];
+
+
+		if( parity == 0 )
+			break; 
+
+	} // stage
+
+#endif
+	
+	if( decision )
+	{
+		for( k = 0; k < n_ldpc; k++ )
+			decword[k] = soft[k];
+	}
+	else
+	{
+		for( k = 0; k < n_ldpc; k++ )
+			decword[k] = soft[k] < 0;
+	}
+
+	return parity ? -iter : iter+1; 
+}
+#endif
+
+
 
 int imin_sum_decod_qc_lm( DEC_STATE* st, double y[], double decword[], int maxsteps, int decision, double alpha, double thr, int qbits, int dbits )
 {
@@ -4796,7 +5885,129 @@ double fht_data2double( FHT_DATA x, int fpp )
 	return res;
 }
 
+#ifdef SUM_PROD_GFQ_ORIG
+void  map_graph
+( 
+ double **soft_in, 
+ double **soft_outs, 
+ int pos_r, 
+ int step, 
+ short *rl, 
+ int q_bits, 
+ int rw, 
+ short **mul, 
+ short **div, 
+ short *mask,
+ short *hard,
+ double *HAD
+ )
+{
 
+	int i, j, k;
+	// ARRAYS
+	static double S_probH[RWMAX][QMAX];
+	static double Sigma_forwardH[RWMAX][QMAX];
+	static double Sigma_backH[RWMAX][QMAX]; // Hadamar domain
+	static FHT_DATA S_prob[RWMAX][QMAX];
+	static FHT_DATA Sigma_f[RWMAX][QMAX];
+	static FHT_DATA Sigma_b[RWMAX][QMAX];;
+	static double s[QMAX];
+	int binlogq = q_bits;
+	int q = 1 << q_bits;
+	int idx;
+	double qinv = 1.0 / (double)q;
+
+
+	// Permutation
+	for( j = 0; j < rw; j++ )
+	{
+		if( mask[j] == 0 )
+		{
+			for( i = 0; i < q; i++ )
+#ifdef ORIG_TABLES
+				s[i] = soft_in[ div[i][rl[j]] ][j*step + pos_r];  
+#else
+				s[i] = soft_in[ div[rl[j]][i] ][j*step + pos_r];  
+#endif
+
+			hadamar( s, S_probH[j], q, binlogq );
+		}
+		else
+		{
+#ifdef ORIG_TABLES
+			short t = mul[hard[j]][rl[j]];
+#else
+			short t = mul[rl[j]][hard[j]];
+#endif
+			for( i = 0; i < q; i++ )
+				S_probH[j][i] = HAD[t * q + i];
+		}
+	}
+
+
+
+	// Alpha
+	for( i = 0; i < q; i++ )
+		Sigma_forwardH[0][i] = S_probH[0][i];
+
+	for( k = 1; k < rw-1; k++ )     //loop over nonzero symbols of the check                                
+		for( i = 0; i < q; i++ )
+			Sigma_forwardH[k][i] = S_probH[k][i] * Sigma_forwardH[k-1][i];
+
+	// Beta
+	for( i = 0; i < q; i++ )
+		Sigma_backH[rw-1][i] = S_probH[rw-1][i];
+
+	for( k = rw-2; k > 0; k-- ) //loop over nonzero symbols of the check
+		for( i = 0; i < q; i++ )
+			Sigma_backH[k][i] = S_probH[k][i] * Sigma_backH[k+1][i];
+
+
+	// Sigma
+	idx = pos_r;
+	for( j = 0; j < rw; j++ )
+	{
+		if( mask[j] == 0 )
+		{
+			double *zptr;
+			double Z[QMAX];
+
+			if( j == 0 )
+				zptr = &Sigma_backH[1][0];
+			else
+			{
+				if( j == rw-1 )
+					zptr = &Sigma_forwardH[rw-2][0];
+				else
+				{
+					for( i = 0; i < q; i++ )
+					{
+						Z[i] = Sigma_forwardH[j-1][i] * Sigma_backH[j+1][i];
+					}
+
+					zptr = Z;
+				}
+			}
+
+
+			hadamar( zptr, s, q, binlogq );
+
+
+
+			for( i = 0; i < q; i++ )
+			{
+#ifdef ORIG_TABLES
+				soft_outs[i][idx] = s[ mul[i][rl[j]] ] / q;
+#else
+				soft_outs[i][idx] = s[ mul[rl[j]][i] ] * qinv;
+#endif
+			}
+		}
+
+		idx += step;
+	}
+}
+#else  //SUM_PROD_GFQ_ORIG
 void  map_graph
 ( 
 	double **soft_in, 
@@ -4841,7 +6052,7 @@ void  map_graph
 				s[i] = soft_in[ div[rl[j]][i] ][j*step + pos_r];  
 #endif
 
-#if 1
+#if 01
 			normalize_abs( s, q, 1,  HAD_FPP );
 			double_int_double( s, q, HAD_FPP );
 #endif
@@ -4858,8 +6069,10 @@ void  map_graph
 				S_probH[j][i] = HAD[t * q + i];
 		}
 
+#if 01
 		normalize_abs( S_probH[j], q, 1, MAP_FPP );
 		double_int_double( S_probH[j], q, MAP_FPP );
+#endif
 	}
 
 
@@ -4984,7 +6197,7 @@ void  map_graph
 		idx += step;
 	}
 }
-
+#endif //SUM_PROD_GFQ_ORIG
 
 int plength( int pol[] )
 {
@@ -5437,6 +6650,499 @@ void normalize( double *x, int n, int step )
 }
 #endif
 
+#ifdef SUM_PROD_GFQ_ORIG
+int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *decword[], int maxiter, double p_thr )
+{
+	int i, j, k;
+	int iter;
+	int syn;
+
+	short *posh = st->fht_pos;
+	short **hc = st->hc;
+	short **hb = st->hb;
+	short **hc_rl = st->fht_hc_rl;
+	short *synd = st->syndr;
+	short *buf = st->fht_buf;
+	short **hb_ri = st->fht_hb_ri; 
+	short **hb_ci = st->fht_hb_ci; 
+	short **hb_cj = st->fht_hb_cj;
+	short **mul_tab = st->fht_t;
+	short **div_tab = st->fht_ti;
+	double **soft_in  = st->fht_soft_in;
+	double **soft_outs= st->fht_soft_outs;
+	double **soft_out = st->fht_soft_out;
+	double **buf0 = st->fht_buf0;
+	double **buf1 = st->fht_buf1;
+	double *HAD = st->fht_HAD;
+	short *smask = st->fht_smask;
+	int *rweight = st->fht_rw;
+	int *list  = st->fht_list;
+	int cw2 = st->fht_all_cw_2;
+	int q_bits = st->q_bits;
+	int max_rw = st->max_rw;
+	int q  = st->q;
+	int nh = st->nh;
+	int rh = st->rh;
+	int m  = st->m;
+	int rg = rh * m;
+	int ng = nh * m;
+	int r = rg;
+	int use_p_thr = p_thr == 0 ? 0 : 1;
+
+	if( cw2 == 0 )
+		return -1;
+
+
+	// Initialize each constituent code symbol by its input soft data 
+
+	for( j = 0; j < rh; j++ )
+	{
+		int cnt = 0;
+
+		for( i = 0; i < nh; i++ )
+		{
+			int pos_n = i * m;
+			int pos_r = j * m;
+			int circ = hb[j][i];
+
+			if( circ != -1 )
+			{
+				for( k = 0; k < q; k++ )
+					rotate( &soft[k][pos_n], &soft_in[k][cnt*r+pos_r], circ, sizeof(soft[0][0]), m );
+				cnt += 1;
+			}
+		}
+	}
+
+
+	// just to compute syndrome before iterations
+	for( i = 0; i < q; i++ )
+		for( j = 0; j < ng; j++ )
+			soft_out[i][j] = soft[i][j];
+
+	if( use_p_thr )
+	{
+		for( i = 0; i < ng; i++ )
+			smask[i] = 0;
+	}
+
+ 
+	for( iter = 0; iter < maxiter; iter++ )
+	{
+		int dcmp = 0;
+		int flag_cnt = 0;
+
+
+#ifdef MAKE_DUMP
+		FILE *fdump = fopen("d:\\huawei\\FHTdecoder\\C\\dump_c.txt", "wt");
+		fprintf(fdump, "iter: %3d\n", iter);
+#endif
+
+		for( i = 0; i < ng; i++ )
+		{
+			double max;
+			int pos;
+
+			if( use_p_thr & smask[i] )	continue;
+
+			max = 0.0;
+			pos = 0;
+
+			for( j = 0; j < q; j++ )
+			{
+				if( max < soft_out[j][i] )
+				{
+					max = soft_out[j][i];
+					pos = j;
+				}
+			}
+
+			qhard[i] = pos;
+			if( use_p_thr && (1 - max < p_thr) )
+			{
+				int ih = i / m;
+				int k  = i % m;
+
+				smask[i] = 1;
+
+				for( j = 0; j < q; j++ )
+					soft[j][i] = 0.0; 
+				
+				soft[pos][i] = 1.0;
+				/*
+				// useless cycle
+				for( j = 0; j < 2; j++ )
+				{
+					int row   = hb_ci[ih][j];
+					int circ  = hb[row][ih];
+					int ph    = hb_cj[ih][j];
+					int pos_r = row*m;
+
+					soft_in[pos][ ph*r + pos_r + (m - circ + k) % m ] = 1;
+				}
+				*/
+				flag_cnt++;
+			}
+		}
+
+		if( iter > 0 )
+		{
+#if 0
+			FILE *fid = fopen("d:\\huawei\\FHTdecoder\\C\\hardq_c.txt", "wt");
+			for( j = 0; j < ng; j++ )
+				fprintf(fid, "%d\n", qhard[j]);
+			fclose(fid);    
+#endif
+
+#if 0
+			FILE *fid = fopen("d:\\huawei\\FHTdecoder\\C\\soft_out_c.txt", "wt");
+			for( i = 0; i < q; i++ )
+			{
+				for( j = 0; j < ng; j++ )
+					fprintf(fid, "%6.4f ", soft_out[i][j]);
+				fprintf(fid, "\n");
+			}
+			fclose(fid);    
+#endif
+		}
+#ifdef MAKE_DUMP
+		{
+			int iii, jjj;
+			fprintf(fdump, "soft\n");
+			for( iii = 0; iii < q; iii++ )
+			{
+				for( jjj = 0; jjj < ng; jjj++ )
+					fprintf(fdump, "%8.6f ",  soft[iii][jjj] );
+				fprintf(fdump, "\n");
+			}
+		}
+#endif
+		// check synfrome
+
+		syn = syndrome_graph_cycle( hb, rh, nh, m, qhard, synd, buf, hc_rl, mul_tab/*, rweight*/ );
+
+		if( syn == 0 )
+		{
+#ifdef MAKE_DUMP
+			fclose( fdump );
+#endif
+			return iter; //break;	// Decoding is finished
+		}
+		
+		// check nodes processing
+		for( j = 0; j < rh; j++ )  //loop over checks
+		{
+			int pos_r = j * m;
+			int weight = rweight[j];
+			static short mask[1024] = {0};
+			static short hard[1024] = {0};
+
+			for( k = 0; k < m; k++ )
+			{
+				// decode constituent code of each row
+				int ii;
+				i = pos_r + k;
+//				if( use_p_thr )
+				{
+					for( ii = 0; ii < weight; ii++ )
+					{
+						short col  = hb_ri[j][ii];
+						short circ = hb[j][col];
+						int jj     = (circ + k) % m;
+						int pos_n  = col * m + jj;
+						if( use_p_thr )
+							mask[ii] = smask[pos_n];
+						hard[ii] = qhard[pos_n];
+					}
+				}
+
+#ifndef SOFT_IN_OUTS
+				map_graph( soft_in, soft_outs, i, r, hc_rl[j], q_bits, weight, mul_tab, div_tab, mask, hard, HAD );
+#else
+				map_graph( soft_in, soft_in, i, r, hc_rl[j], q_bits, weight, mul_tab, div_tab, mask, hard, HAD );
+#endif
+#ifdef MAKE_DUMP
+				{
+					int iii, jjj;
+					fprintf(fdump, "%4d soft_in\n", i);
+
+					for( iii = 0; iii < q; iii++ )
+					{
+						for( jjj = 0; jjj < rweight[j]; jjj++ )
+							fprintf(fdump, "%8.6f ",  soft_in[iii][jjj*r + i] );
+						fprintf(fdump, "\n");
+					}
+/*
+					fprintf(fdump, "mask\n", i);
+					for( jjj = 0; jjj < weight; jjj++ )
+						fprintf(fdump, "%1d ",  mask[jjj] );
+					fprintf(fdump, "\n");
+*/
+/*
+					fprintf(fdump, "hard\n", i);
+					for( jjj = 0; jjj < weight; jjj++ )
+						fprintf(fdump, "%2d ",  hard[jjj] );
+					fprintf(fdump, "\n");
+*/
+					fprintf(fdump, "%4d soft_outs\n", i);
+					for( iii = 0; iii < q; iii++ )
+					{
+						for( jjj = 0; jjj < rweight[j]; jjj++ )
+							fprintf(fdump, "%8.6f ",  soft_outs[iii][jjj*r + i] );
+						fprintf(fdump, "\n");
+					}
+				}
+#endif
+			}
+		}
+
+#ifdef MAKE_DUMP
+		fprintf(fdump, "all soft_outs\n");
+
+		for( i = 0; i < q; i++ )
+		{
+			for( j = 0; j < 4; j++ )
+			{
+				fprintf(fdump, "i = %4d, j = %4d\n", i+1, j+1 );
+				for( k = 0; k < rg; k++ )
+				{
+					fprintf(fdump, "%8.6f ",  soft_outs[i][j*rg + k] );
+				}
+				fprintf(fdump, "\n");
+			}
+			fprintf(fdump, "\n");
+		}
+#endif
+
+		// symbol nodes
+
+		for( i = 0; i < rh; i++ )
+			posh[i] = 0;
+
+
+
+#ifdef COLUMN_BY_COLUMN
+		for( i = 0; i < nh; i++ )
+		{
+			static double bf0[1024];
+			static double bf1[1024];
+			int pos_n = i * m;
+			int row0 = hb_ci[i][0];
+			int row1 = hb_ci[i][1];
+			int circ0 = hb[row0][i];
+			int circ1 = hb[row1][i];
+			int ph0 = posh[row0];
+			int ph1 = posh[row1];
+			int pos_r0 = row0*m;
+			int pos_r1 = row1*m;
+			int index0 = ph0*r + pos_r0;
+			int index1 = ph1*r + pos_r1;
+
+			int kkk0 = (m - circ0) % m;
+			int kkk1 = (m - circ1) % m;
+
+			for( k = 0; k < m; k++ )
+			{
+				int ii = pos_n + k;
+				double a, b, c;
+
+#ifdef MAKE_DUMP
+//				fprintf(fdump, "%4d mask = %1d\n", dcmp, smask[ii] );				
+				fprintf(fdump, "soft_out %8d\n", ii+1);
+#endif
+
+				if( kkk0 == m )
+					kkk0 = 0;
+
+				if( kkk1 == m )
+					kkk1 = 0;
+
+				if( use_p_thr & smask[ii] )
+				{
+					for( j = 0; j < q; j++ )	soft_out[j][ii] = soft[j][ii];
+#ifdef MAKE_DUMP
+					for( j = 0; j < q; j++ )
+						fprintf(fdump, "%8.6f ", soft_out[j][ii] );
+					fprintf(fdump, "\n");
+#endif
+				}
+				else
+				{
+					for( j = 0; j < q; j++ )
+					{
+#ifndef SOFT_IN_OUTS
+						double b0 = soft_outs[j][index0 + kkk0];
+						double b1 = soft_outs[j][index1 + kkk1];
+#else
+						double b0 = soft_in[j][index0 + kkk0];
+						double b1 = soft_in[j][index1 + kkk1];
+#endif
+						double x = soft[j][ii];
+						double y0 = x * b0;
+						double y1 = x * b1;
+							
+						bf0[j] = y1;
+						bf1[j] = y0;
+						soft_out[j][ii] = y1 * b0;
+					}
+
+					a = 0;
+
+					for( j = 0; j < q; j++ )
+						a += soft_out[j][ii];
+#ifdef MAKE_DUMP
+					for( j = 0; j < q; j++ )
+						fprintf(fdump, "%8.6f ", soft_out[j][ii] );
+					fprintf(fdump, "\n");
+#endif
+					a = 1.0 / a;
+					for( j = 0; j < q; j++ )
+						soft_out[j][ii] *= a;
+
+					c = b = 0;
+
+					for( j = 0; j < q; j++ )
+					{
+						b += bf0[j];
+						c += bf1[j];
+					}
+#ifdef MAKE_DUMP
+					fprintf(fdump, "soft_in\n");
+					for( j = 0; j < q; j++ )
+						fprintf(fdump, "%8.6f ", bf0[j] );
+					fprintf(fdump, "\n");
+
+					fprintf(fdump, "soft_in\n");
+					for( j = 0; j < q; j++ )
+						fprintf(fdump, "%8.6f ", bf1[j] );
+					fprintf(fdump, "\n");
+#endif
+					b = 1.0 / b;
+					c = 1.0 / c;
+					for( j = 0; j < q; j++ )
+					{
+						bf0[j] *= b;
+						bf1[j] *= c;
+					}
+
+					for( j = 0; j < q; j++ )
+					{
+						soft_in[j][index0 + kkk0] = bf0[j];
+						soft_in[j][index1 + kkk1] = bf1[j];
+					}
+				}
+
+				kkk0++;
+				kkk1++;
+
+				dcmp++;
+			}
+
+			posh[row0] += 1;
+			posh[row1] += 1;
+
+		}
+
+#else   //COLUMN_BY_COLUMN
+		for( i = 0; i < nh; i++ )
+		{
+			int pos_n = i * m;
+			int r0 = hb_ci[i][0];
+			int r1 = hb_ci[i][1];
+			int circ0 = hb[r0][i];
+			int circ1 = hb[r1][i];
+			int ph0 = posh[r0];
+			int ph1 = posh[r1];
+			int pos_r0 = r0*m;
+			int pos_r1 = r1*m;
+			int index0 = ph0*r + pos_r0;
+			int index1 = ph1*r + pos_r1;
+
+			for( j = 0; j < q; j++ )
+			{
+#ifndef SOFT_IN_OUTS
+				rotate( &soft_outs[j][index0], &buf0[j][0], m - circ0, sizeof(soft_in[0][0]), m );
+				rotate( &soft_outs[j][index1], &buf1[j][0], m - circ1, sizeof(soft_in[0][0]), m );
+#else
+				rotate( &soft_in[j][index0], &buf0[j][0], m - circ0, sizeof(soft_in[0][0]), m );
+				rotate( &soft_in[j][index1], &buf1[j][0], m - circ1, sizeof(soft_in[0][0]), m );
+#endif
+			}
+
+			for( j = 0; j < q; j++ )
+			{
+				for( k = 0; k < m; k++ )
+				{
+					int ii = pos_n + k;
+					double x = soft[j][ii];
+					double b0 = buf0[j][k];
+					double b1 = buf1[j][k];
+					double y0 = x * b0;
+					double y1 = x * b1;
+
+					buf0[j][k] = y1;
+					buf1[j][k] = y0;
+					soft_out[j][ii] = y1 * b0;
+				}
+			}
+
+
+			for( k = 0; k < m; k++ )
+			{
+				int ii = pos_n + k;
+				double a = 0;
+
+				for( j = 0; j < q; j++ )
+					a += soft_out[j][ii];
+
+				a = 1.0 / a;
+				for( j = 0; j < q; j++ )
+					soft_out[j][ii] *= a;
+			}
+
+
+			for( k = 0; k < m; k++ )
+			{
+				double a = 0;
+				double b = 0;
+				int ii = pos_n + k;
+			
+				for( j = 0; j < q; j++ )
+				{
+					a += buf0[j][k];
+					b += buf1[j][k];
+				}
+
+				a = 1.0 / a;
+				b = 1.0 / b;
+				for( j = 0; j < q; j++ )
+				{
+					buf0[j][k] *= a;
+					buf1[j][k] *= b;
+				}
+			}
+
+			for( j = 0; j < q; j++ )
+			{
+				rotate( &buf0[j][0], &soft_in[j][index0], circ0, sizeof(soft_in[0][0]), m );
+				rotate( &buf1[j][0], &soft_in[j][index1], circ1, sizeof(soft_in[0][0]), m );
+			}
+
+			posh[r0] += 1;
+			posh[r1] += 1;
+
+		}
+#endif    //  COLUMN_BY_COLUMN
+#ifdef MAKE_DUMP
+		fclose( fdump );
+#endif
+	}
+
+	return -iter;	// errors detected but not corrected
+};
+
+#else //SUM_PROD_GFQ_ORIG
+
 int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *decword[], int maxiter, double p_thr )
 {
 	int i, j, k;
@@ -5748,7 +7454,7 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 			for( k = 0; k < m; k++ )
 			{
 				int ii = pos_n + k;
-				double a;//, b, c;
+				double a, b, c;
 
 				if( kkk0 == m )
 					kkk0 = 0;
@@ -6178,7 +7884,7 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 
 	return -iter;	// errors detected but not corrected
 };
-
+#endif //SUM_PROD_GFQ_ORIG
 
 #ifndef SKIP_MEX
 // %
@@ -6229,6 +7935,7 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
     static int BBsize;
     int i, iter;
 	static double	ms_alpha	= MS_ALPHA;
+	static double	ms_beta 	= MS_BETA;
 	static double	ms_thr		= MS_THR;
 	static int		ms_qbits	= MS_QBITS;
 	static int		ms_dbits	= MS_DBITS;
@@ -6237,14 +7944,6 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
     static int     q;
     static int     ng;
 	static double p_thr;
-	/*
-	#define MS_ALPHA 0.9//1.0
-	#define MS_THR   1.4	
-	#define MS_QBITS 5
-	#define MS_DBITS 16
-	*/
-    
-    // этот вариант переделан только для q-ичного кода
     
     static DEC_STATE* state = NULL;
 
@@ -6265,7 +7964,7 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
          double **pp;
            // run decoder
            // mexPrintf("run the decoder\n");
-          // [iter_C, softq_C, hardq_C] =  decode( soft, maxsteps );            
+          // [iter_C, softq_C, hardq_C, min_abs_llr, sgn_cnt] =  decode( soft, maxsteps );            
             maxiter = (int)mxGetPr(pInp[1])[0];
             q   = (int)mxGetM(pInp[0]);
             ng = (int)mxGetN(pInp[0]);
@@ -6278,25 +7977,25 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
 
            if( state->q == q )
             {
-                pOut[0]=mxCreateDoubleMatrix(q,ng,mxREAL);
-                pOut[1]=mxCreateDoubleMatrix(1,1,mxREAL); 
-           
-	        if( nOut == 3 )
-                     pOut[2]=mxCreateDoubleMatrix(1,ng,mxREAL);
+//                pOut[0]=mxCreateDoubleMatrix(q,ng,mxREAL);			//hard
+                pOut[0]=mxCreateDoubleMatrix(1,ng,mxREAL);			//hard
+                pOut[1]=mxCreateDoubleMatrix(1,1,mxREAL);			//iter
+     
+				if( nOut > 2 )	pOut[2]=mxCreateDoubleMatrix(1,ng,mxREAL);		//min abs llr
+				if( nOut > 3 )	pOut[3]=mxCreateDoubleMatrix(1,ng,mxREAL);		//sgn counter
 
                 if( q == 1 )  
-		    unpackRow(mxGetPr(pInp[0]), 1, ng, state->y );
+					unpackRow(mxGetPr(pInp[0]), 1, ng, state->y );
                 else
                     unpackMatrix(mxGetPr(pInp[0]), q, ng, state->qy );
-
 
                 decision = 0;   
                 
                 if( q == 1 )
                 {
-		    if( nInp == 3 )
+					if( nInp == 3 )
                         decision = (int)mxGetPr(pInp[2])[0];
-		    else
+					else
                         decision = 0;
                 }
 
@@ -6308,19 +8007,18 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
                    case 3: iter = min_sum_decod_qc_lm( state, state->y, state->decword, maxiter, decision, ms_alpha );      break;
                    case 4: iter = imin_sum_decod_qc_lm( state, state->y, state->decword, maxiter, decision, ms_alpha, ms_thr, ms_qbits, ms_dbits); break;
                    case 5: iter = isum_prod_gf2_decod_qc_lm( state, state->y, state->decword, maxiter, decision);           break;
-	           case 6: iter = sum_prod_gfq_decod_lm( state, state->qy, state->qhard, state->qdecword, maxiter, p_thr ); break;
+	               case 6: iter = sum_prod_gfq_decod_lm( state, state->qy, state->qhard, state->qdecword, maxiter, p_thr ); break;
                    case 7: iter = tdmp_sum_prod_gf2_decod_qc_lm( state, state->y, state->decword, maxiter, decision);       break;
+                   case 8: iter = lmin_sum_decod_qc_lm( state, state->y, state->decword, maxiter, decision, ms_alpha, ms_beta );      break;
+				   case 9: iter = lche_decod( state, state->y, state->decword, maxiter, decision);                          break;
                 }
 
-
-
    
-		pOut[1] =  mxCreateDoubleScalar(iter);
+		        pOut[1] =  mxCreateDoubleScalar(iter);
 
-               
-
+           
                 p = mxGetPr(pOut[0]);
-               
+
                 if( q == 1 )
                     for(  i = 0;  i < ng;  i++ )
                         p[i] = state->decword[i];
@@ -6328,6 +8026,37 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
                     for(  i = 0;  i < ng;  i++ )
                         p[i] = state->qhard[i];
          
+
+                if( nOut > 2 )	
+				{
+					p = mxGetPr(pOut[2]);
+
+                    mexPrintf("p: %d\n", (int)p);
+   
+                    if( dectype == 2 || dectype == 7 || dectype == 8)
+                        for(  i = 0;  i < ng;  i++ ) 
+                            p[i] = state->min_abs_llr[i];
+                    else
+                        for(  i = 0;  i < ng;  i++ ) 
+                            p[i] = 0;
+    
+				}
+
+				if( nOut > 3 )
+				{
+					p = mxGetPr(pOut[3]);
+
+                    mexPrintf("p: %d\n", (int)p);
+
+					if( dectype == 2 || dectype == 7 || dectype == 8)
+    					for(  i = 0;  i < ng;  i++ )
+        					p[i] = state->sign_counter[i];
+                    else
+    					for(  i = 0;  i < ng;  i++ )
+        					p[i] = 0;
+ 
+				}
+
             }
             else
             {
@@ -6376,7 +8105,8 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
                   // Open qDEc  decoder_type, c, HB, M
 	      //mexPrintf("open bin decoder\n");
 
-              q_bits = (int)mxGetPr(pInp[1])[0];
+
+  			  q_bits = (int)mxGetPr(pInp[1])[0];
               mh = (int)mxGetM(pInp[2]);
               nh = (int)mxGetN(pInp[2]);
                         
@@ -6384,8 +8114,16 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
               N = nh * M;
               R = mh * M;
 
-	      //mexPrintf("qbits = %d, mh = %d, nh = %d, M = %d\n", q_bits, mh, nh, M);
+			  if( nInp >= 5 )
+				  ms_alpha = mxGetPr(pInp[4])[0];
 
+			  if( nInp >= 6 )
+				  ms_beta = mxGetPr(pInp[5])[0];
+
+//			  mexPrintf("alpha: %f, beta %f\n", ms_alpha, ms_beta);
+
+	      //mexPrintf("qbits = %d, mh = %d, nh = %d, M = %d\n", q_bits, mh, nh, M);
+			  
 
               if( state )
                   decod_close( state );
@@ -6414,101 +8152,6 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
 
          }
      }
-     
-#if 0
-    else
-    //if( nInp >= 4 )
-    {
-        // SETUP :result = bp_decod_qc_lm( HC, M, niter, dectype, decision ); OR result = bp_decod_qc_lm( HC, M, niter, dectype, decision, alpha );( for dectype == 3 )
-        if( nOut != 1 )
-        {
-            mexErrMsgTxt("Only one output argument allowed for SETUP");
-        }
-
-        M = (int)mxGetPr(pInp[1])[0];
-        maxiter = (int)mxGetPr(pInp[2])[0];
-        dectype = (int)mxGetPr(pInp[3])[0];
-		if( nInp >= 5 )
-			ms_alpha = (double)mxGetPr(pInp[4])[0];
-//        if( dectype < 0 || dectype > 1 )
-//            mexErrMsgTxt("Illegal decoder type");
-		if( nInp >= 6 )
-			ms_thr = (double)mxGetPr(pInp[5])[0];
-		if( nInp >= 7 )
-			ms_qbits = (int)mxGetPr(pInp[6])[0];
-		if( nInp == 8 )
-			ms_dbits = (int)mxGetPr(pInp[7])[0];
-
-        
-        mh = (int)mxGetM(pInp[0]);
-        nh = (int)mxGetN(pInp[0]);
-        N = nh * M;
-        R = mh * M;
-        BBsize = __max(mh,nh-mh);
-        mexPrintf("nh = %d mh = %d N = %d maxiter = %d\n", nh, mh, N, maxiter);
-        
-        // Check if dynamic arrays were allocated
-        if( state )
-        {
-             decod_close( state, state->rh, state->nh, state->m, state->n, __max(state->rh,state->nh-state->rh), state->codec_id );
-        }
-        state = decod_open( dectype, mh, nh, N, M, BBsize, R );
-        if( state == NULL )
-             mexErrMsgTxt("Allocation error");
-        unpackMatrix_double2short(mxGetPr(pInp[0]), mh, nh, state->hd );
-        
-        pOut[0]=mxCreateDoubleMatrix(1,1,mxREAL); 
-        *(mxGetPr(pOut[0])) = 1;
-        return;
-    }
-    
-    // decoding
-    if( nInp == 1 || nInp == 2 )
-    {
-        double *p;
-        if( state == NULL )
-            mexErrMsgTxt("Decoder not opend"); 
-        
-        if( nOut != 2 )
-            mexErrMsgTxt("Only two output argument allowed for DECODING");
-        // Decoding, only 1 input param - input vector
-//        unpackRow(mxGetPr(pInp[0]), 1, N, y );
-        pOut[0]=mxCreateDoubleMatrix(1,N,mxREAL);
-        p = mxGetPr(pOut[0]);
-
-		unpackRow(mxGetPr(pInp[0]), 1, N, state->y );
-		if( nInp == 2 )
-			decision = (int)mxGetPr(pInp[1])[0];
-		else
-			decision = 0;
-
-        switch( dectype )
-        {
-            case 0: iter = bp_decod_qc_lm( state, state->y, state->decword, maxiter, decision);			 break;
-            case 1: iter = sum_prod_decod_qc_lm( state, state->y, state->decword, maxiter, decision);	 break;
-            case 2: iter = sum_prod_gf2_decod_qc_lm( state, state->y, state->decword, maxiter, decision); break;
-			case 3: iter = min_sum_decod_qc_lm( state, state->y, state->decword, maxiter, decision, ms_alpha ); break;
-			case 4: iter = imin_sum_decod_qc_lm( state, state->y, state->decword, maxiter, decision, ms_alpha, ms_thr, ms_qbits, ms_dbits); break;
-            case 5: iter = isum_prod_gf2_decod_qc_lm( state, state->y, state->decword, maxiter, decision); break;
-
-        }
-
-		for( i = 0; i < N; i++ )
-			p[i] = state->decword[i];
-
-		pOut[1] =  mxCreateDoubleScalar(iter);
-        //pOut[0]=mxCreateDoubleMatrix(1,1,mxREAL); 
-        //*(mxGetPr(pOut[0])) = iter;
-        return;
-    }
-    
-    if( nInp == 0 && state != NULL )
-    {
-        // Check if dynamic arrays were allocated
-        decod_close( state, state->rh, state->nh, state->m, state->n, __max(state->rh,state->nh-state->rh), state->codec_id );
-        state = NULL;
-    }
-#endif  //0
 }
 #endif
 

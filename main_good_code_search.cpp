@@ -57,7 +57,7 @@ int main_good_code_search(int argc, char *argv[]) {
     int num_trials_base;        // former trials[0]
     int num_trials_column;      // former trials[1]
     int num_random_codes;       // former N_codes
-    int num_bp_iterations;      // former maxiter
+    int num_iterations;      // former maxiter
     int num_experiments;        // former Nexp
     int num_frame_errors;       // former Nerr
     int num_start_config;       // former Jstart
@@ -89,8 +89,13 @@ int main_good_code_search(int argc, char *argv[]) {
     // 0. Helper info about portability choices from commons_portable.h
     //commons_portable_print_info();
 
-    if (argc != 3) {
+    if (argc < 3) {
         die("Expected two arguments: the scenario file name and the result file name");
+    }
+
+    bool suppress_constraints = false;
+    if (argc > 3 && string("silent") == argv[3]) {
+        suppress_constraints = true;
     }
 
     // 1. Reading scenario
@@ -112,7 +117,7 @@ int main_good_code_search(int argc, char *argv[]) {
         f_scenario.select("trials/base_matrix").cast_to(num_trials_base);
         f_scenario.select("trials/column").cast_to(num_trials_column);
         f_scenario.select("num_random_codes").cast_to(num_random_codes);
-        f_scenario.select("max_bp_iterations").cast_to(num_bp_iterations);
+        f_scenario.select("max_bp_iterations").cast_to(num_iterations);
         f_scenario.select("num_codewords").cast_to(num_experiments);
         f_scenario.select("error_blocks").cast_to(num_frame_errors);
         f_scenario.select("start_config_number").cast_to(num_start_config);
@@ -187,8 +192,10 @@ int main_good_code_search(int argc, char *argv[]) {
             for (unsigned i = 0, i_max = (unsigned int)deg_indices.size(); i < i_max; ++i) {
                 column_weights[deg_indices[i]] += degree_config[i];
             }
-            for (int i = 0; i <= max_nonzero_degree; ++i) {
-                printf("%d ", column_weights[i]);
+            if (!suppress_constraints) {
+                for (int i = 0; i <= max_nonzero_degree; ++i) {
+                    printf("%d ", column_weights[i]);
+                }
             }
 
             bool constraints_violated = false;
@@ -203,8 +210,15 @@ int main_good_code_search(int argc, char *argv[]) {
                 }
             }
             if (constraints_violated) {
-                printf("=> violates constraints, skipping\n");
+                if (!suppress_constraints) {
+                    printf("=> violates constraints, skipping\n");
+                }
                 continue;
+            }
+            if (suppress_constraints) {
+                for (int i = 0; i <= max_nonzero_degree; ++i) {
+                    printf("%d ", column_weights[i]);
+                }
             }
             printf("\n");
         }
@@ -229,6 +243,27 @@ int main_good_code_search(int argc, char *argv[]) {
                         continue;
                     }
 
+                    // 5.1. Counting row weights
+                    vector< int > row_weights;
+                    for (int i = 0; i < num_check_symbols; ++i) {
+                        unsigned count = 0;
+                        for (int j = 0; j < code_max_length; ++j) {
+                            count += bm.data(i, j) != 0;
+                        }
+                        while (row_weights.size() <= count) {
+                            row_weights.push_back(0);
+                        }
+                        ++row_weights[count];
+                    }
+                    vector< vector< int > > row_weights_write;
+                    for (unsigned i = 0, i_max = row_weights.size(); i < i_max; ++i) {
+                        if (row_weights[i] != 0) {
+                            row_weights_write.push_back(vector< int >());
+                            row_weights_write.back().push_back(i);
+                            row_weights_write.back().push_back(row_weights[i]);
+                        }
+                    }
+
                     // 6. Generating various codes and test then with different SNRs
                     for (int code_to_test = 0; code_to_test < codes_to_test; ++code_to_test) {
                         double bad_code_multiple = bad_code_multiples[0].second;
@@ -238,9 +273,13 @@ int main_good_code_search(int argc, char *argv[]) {
                             }
                         }
                         // 6.0. Printing where we are.
-                        printf("---------------------\nCurrent configuration:");
+                        printf("---------------------\nCurrent COLUMN configuration:");
                         for (int i = 0; i <= max_nonzero_degree; ++i) {
                             printf(" %d", column_weights[i]);
+                        }
+                        printf("\nCurrent ROW configuration:");
+                        for (unsigned i = 0, i_max = row_weights_write.size(); i < i_max; ++i) {
+                            printf(" (%d -> %d)", row_weights_write[i][0], row_weights_write[i][1]);
                         }
                         printf("\nCurrent matrix: #%d\nCurrent code: #%d\n---------------------\n", matrix_index, code_to_test);
 
@@ -280,7 +319,7 @@ int main_good_code_search(int argc, char *argv[]) {
                             pair<double, double> bp_result = bp_simulation(
                                     result,
                                     tailbite_length,
-                                    num_bp_iterations,
+                                    num_iterations,
                                     num_frame_errors,
                                     num_experiments,
                                     snrs[s],
@@ -329,24 +368,31 @@ int main_good_code_search(int argc, char *argv[]) {
 
 							int rows = result.n_rows();
 							int columns = result.n_cols();
+							double bitrate = (double)(columns - rows) / (columns - punctured_blocks);
 
                             vector<settings> snr_results;
                             for (int s = 0, s_max = (int) snrs.size(); s < s_max; ++s) {
 								settings snr_curr;
 								snr_curr.open("SNR_per_bit___").set(snrs[s]);
-								double bitrate = (double)(columns - rows) / (columns - punctured_blocks);
 								double EsNo = snrs[s] + 10.0 * log10( 2.0 * bitrate );
 								snr_curr.open("SNR_per_symbol").set( EsNo );
 								snr_curr.open("BER").set(pr_err(s, 0));
 								snr_curr.open("FER").set(pr_err(s, 1));
-								snr_curr.open("punctured_blocks").set(punctured_blocks);
-								snr_curr.open("bitrate").set(bitrate);
 								snr_results.push_back(snr_curr);
                             }
 
                             settings descriptor;
+							descriptor.open("_decoder_name").set(DEC_FULL_NAME[decoder_type]);
+							descriptor.open("_decoder_type").set(decoder_type);
+							descriptor.open("_lifting").set(tailbite_length);
+							descriptor.open("_SNRs").set(snrs);
+							descriptor.open("_punctured_blocks").set(punctured_blocks);
+							descriptor.open("_iterations").set(num_iterations);
+							descriptor.open("_marking").set("skip");
+							descriptor.open("code_bitrate").set(bitrate);
                             descriptor.open("code").set(result);
                             descriptor.open("column_weights").set(column_weights);
+                            descriptor.open("row_weights").set(row_weights_write);
                             descriptor.open("girth").set(gs);
                             descriptor.open("config_index").set(config_index);
                             descriptor.open("matrix_index").set(matrix_index);

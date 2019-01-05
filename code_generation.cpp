@@ -8,6 +8,30 @@ using std::vector;
 
 class interruption_exception : public std::exception {};
 
+bool check_same_colums( matrix< int > const &code_matrix )
+{
+    int R = code_matrix.n_rows();
+    int N = code_matrix.n_cols();
+	
+
+	for( int j = 0; j < N; j++ )
+	{
+		// compare j-th column with all others from j+1 to N
+		int i;
+		for( int jc = j+1; jc < N; jc ++ )
+		{
+			for( i = 0; i < R; i++ )
+			{
+				if( code_matrix(i,j) != code_matrix(i,jc) )
+					break;
+			}
+			if( i == R )
+				return true;
+		}
+	}
+	return false;
+}
+
 bool generate_code(
     matrix< int > const &code_matrix,
     int target_girth,
@@ -54,7 +78,7 @@ bool generate_code(
             }
             bool ok = b.check_voltages(voltages).check_modulo(max_module);
             if (ok) {
-                printf("\n  1 codes selected, %d tested\n", attempt + 1);
+//                printf("\n  1 codes selected, %d tested\n", attempt + 1);
                 result_matrix = code_matrix;
                 for (int col = 0, vp = 0; col < N; ++col) {
                     for (int row = 0; row < R; ++row) {
@@ -65,7 +89,18 @@ bool generate_code(
                         }
                     }
                 }
-                return true;
+				// checking the same column
+				bool same_cols = check_same_colums( result_matrix );
+				if( same_cols )
+				{
+					printf("=============================> matrix with same columns\n" );
+					continue;
+				}
+				else
+				{
+	                printf("\n  1 codes selected, %d tested\n", attempt + 1);
+					return true;
+				}
             }
 
             console_message_hook i_hook('i', "prints how much codes is tested", format_to_string("    n = %d, %d tested, 0 found\n", N, attempt + 1));

@@ -174,7 +174,7 @@ void read_intervals(std::string const &data, output_iterator out) {
         char ch = i == i_max ? ' ' : data[i];
         const int SPC = 0, DIG = 1, HYP = 2, ETC = 3;
         int category = ch <= ' ' ? SPC : ('0' <= ch && ch <= '9' ? DIG : (ch == '-' ? HYP : ETC));
-        if (category == 3) {
+        if (category == ETC) {
             throw interval_exception(format_to_string("String '%s', index %u: unexpected symbol '%c'", data.c_str(), i + 1, ch));
         }
         switch (state) {

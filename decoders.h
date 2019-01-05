@@ -22,7 +22,9 @@ enum  DEC_ID
 	IMS_DEC,
 	IASP_DEC,
 	FHT_DEC,
-	TASP_DEC
+	TASP_DEC,
+	LMS_DEC,
+	LCHE_DEC
 };
 
 extern char const * const DEC_FULL_NAME[];
@@ -31,12 +33,15 @@ extern char const * const DEC_FULL_NAME[];
 #define SKIP  -1
 #define TRUE_CIRCULANT
 
-
+/*
 #ifdef MS_MUL_CORRECTION
-#define MS_ALPHA 0.95
+#define MS_ALPHA 0.8
 #else
 #define MS_ALPHA 0.02//0.075//0.02
 #endif
+*/
+#define MS_ALPHA 0.8
+#define MS_BETA  0.4
 
 #define MS_THR   1.4
 #define MS_QBITS 6//5//6
@@ -147,6 +152,12 @@ typedef struct
 	double  **qy;
 	double  **qdecword;
 	short   *qhard;
+	
+//#ifdef KEEP_STATISTIC
+	double *sign_counter;
+	double *min_abs_llr;
+	double *prev_soft;
+//#endif
 
 	// Belief Propagation Decoder
 	double  *bp_data;      
@@ -245,14 +256,30 @@ typedef struct
 	// TDMP Advanced Sum-Prod Decoder
 	double  *tasp_data0;
 	double	*tasp_tmp;
-//	double  *tasp_p0;
-//	double	*tasp_p1;
+	//	double  *tasp_p0;
+	//	double	*tasp_p1;
 	double  *tasp_soft_out;
-//	int		*tasp_posh;
-//	int     *tasp_rw;
-//	int		**tasp_hc_ri;
+	//	int		*tasp_posh;
+	//	int     *tasp_rw;
+	//	int		**tasp_hc_ri;
 	double  **tasp_state;
-//	int		tasp_all_cw_2;
+	//	int		tasp_all_cw_2;
+
+	// Layered Min-Sum Decoder
+	MS_DATA *lms_soft;
+	short	*lms_BnNS;
+	MS_DEC_STATE *lms_dcs;
+	MS_DEC_STATE *lms_tmps;
+	MS_DATA *lms_buffer;
+	MS_DATA *lms_rbuffer;
+	MS_DATA *lms_rsoft;
+
+
+	// Low complexity-high efficienty Decoder
+	double  *lche_data0;
+	double	*lche_tmp;
+	double  *lche_soft_out;
+	double  **lche_state;
 
 }DEC_STATE;
 
@@ -269,6 +296,8 @@ int imin_sum_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int ma
 int isum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision );    
 int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *decword[], int maxiter, double p_thr );
 int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision );    
+int lmin_sum_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision, double alpha, double beta );    
+int lche_decod( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision );    
 
 
 
