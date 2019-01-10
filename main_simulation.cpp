@@ -24,6 +24,11 @@
 #include "decoders.h"
 #include "settings.h"
 
+#include "3d_array.h"
+#include "trace_pm.h"
+#define GMAX 12
+#define GTARGET 2
+
 #define DEFAULT_MARKING "skip"
 #define TARGET_ERR 0.01
 
@@ -117,6 +122,76 @@ static pair<string, string> generate_paths(string file) {
     return make_pair(absolute_file, file);
 }
 
+static int trace_matrix( matrix<int> current_HM, int M, int gtarget, vector<int> &ACE, vector<int> &girth_spectrum )
+{
+	int i, j;
+	int girth;
+	ARRAY matr;
+	int S[GMAX];
+	int SA[GMAX];
+	int HDrow = current_HM.n_rows();
+	int HDcol = current_HM.n_cols();
+	int gmax = GMAX;
+	for( i = 0; i < GMAX; i++ ) S[i]  = 0;	
+	for( i = 0; i < GMAX; i++ ) SA[i] = 0;	
+
+	matr.ndim = 2;
+
+	put_nrow( &matr, HDrow );
+	put_ncol( &matr, HDcol );
+	put_addr( &matr, Alloc2d_int( HDrow, HDcol ) );
+
+	for( i = 0; i < HDrow; i++ )
+		for( j = 0; j < HDcol; j++ )
+			matr.addr[i][j] = current_HM(i,j);
+
+	trace_bound_pol_mon_pm( matr, M, gmax, gtarget, S, SA );
+
+	for( girth = 1; girth < GMAX+1; girth++ )
+	{
+		if( S[girth-1] )
+			break;
+	}
+
+	free( matr.addr );
+
+	for( int j = 0, i = girth-1; i < gmax; i++ )
+	{
+		if( SA[i] )
+		{
+			ACE[j++] = SA[i];
+			if( j == GTARGET ) break;
+		}
+	}
+
+	for( int j = 0, i = girth-1; i < gmax; i++ )
+	{
+		if( S[i] )
+		{
+			girth_spectrum[j++] = S[i];
+			if( j == GTARGET ) break;
+		}
+	}
+
+
+	return girth;
+}
+
+static void show_matrix_property( vector<int> ACE, vector<int> girth_spectrum, int girth, int num )
+{
+	printf("girth: %3d, ", girth);
+
+	printf("ACE: "); 
+
+	for( int i = 0; i < num; i++ )
+		printf("%3d ", ACE[i] ); 
+
+	printf(",  Girth_spectrum: "); 
+
+	for( int i = 0; i < num; i++ )
+		printf("%5d ", girth_spectrum[i] ); 
+}
+
 int main_simulation(int argc, char *argv[]) {
     int tailbite_length;        // former M
     vector< double > snrs;      // former SNRS
@@ -182,6 +257,7 @@ int main_simulation(int argc, char *argv[]) {
 
     }
 
+	printf("scenario OK\n");
     // 2. Writing the main output file. All other output is appended to another file, which is referenced from here.
 
     pair<string, string> file_with_codes = generate_paths(string(argv[1]));
@@ -230,6 +306,9 @@ int main_simulation(int argc, char *argv[]) {
 			vector< double > best_FER(s_max); 
 			vector< double > org_BER(s_max);
 			vector< double > org_FER(s_max); 
+
+			vector< int > ACE(GTARGET);
+			vector< int > girth_spectrum(GTARGET);
 
 			best_snr_idx = s_max;
 
@@ -325,6 +404,7 @@ int main_simulation(int argc, char *argv[]) {
             do
             {
 				int s;
+				int curr_girth;
 
 				for( s = 0; s < s_max; s++ )
 				{
@@ -334,15 +414,17 @@ int main_simulation(int argc, char *argv[]) {
 					{
 						if( s == 0 )
 							printf("====================================================\n");
-						printf( "code #%d, original matrix is being processed, SNR = %6.3f\r", code_idx, snrs[s] );
+						printf( "code #%d, original matrix is being processed, SNR = %6.3f\n", code_idx, snrs[s] );
 					}
 					else
-						printf( "code #%d, marked matrix #%d is being processed, SNR = %6.3f\r", code_idx, mark_num, snrs[s] );
+						printf( "code #%d, marked matrix #%d is being processed, SNR = %6.3f\n", code_idx, mark_num, snrs[s] );
 
 					EsN0[s] = snrs[s] + 10.0 * log10( 2.0 * bitrate );
 
 					reset_random(); // all codes are tested with same noise
 
+					curr_girth = trace_matrix( current_HM, tailbite_length, GTARGET, ACE, girth_spectrum ); 
+					show_matrix_property( ACE, girth_spectrum, curr_girth, GTARGET );
 
 	                result = bp_simulation(
                             current_HM,
@@ -442,6 +524,9 @@ int main_simulation(int argc, char *argv[]) {
 					descriptor.open("column_weights").set(column_weights);
 					descriptor.open("row_weights").set(row_weights_write);
 					descriptor.open("girth").set(girth);
+					descriptor.open("girth_").set(curr_girth);
+					descriptor.open("girth_ACE").set(ACE);
+					descriptor.open("girth_spectrum").set(girth_spectrum);
 					descriptor.open("config_index").set(config_index);
 					descriptor.open("matrix_index").set(matrix_index);
 					descriptor.open("code_index").set(code_index);
@@ -451,19 +536,19 @@ int main_simulation(int argc, char *argv[]) {
 				}
 
 
-                if (good_code)
+                //if (good_code)
                 {
                         printf("\nbest mark: %d\n", best_mark);
-						printf("        |        FER        |       BER \n"  );
-						printf("  SNR   |    orig     best  |   orig     best\n"  );
+						printf("        |             FER               |            BER \n"  );
+						printf("  SNR   |    orig     best     curr     |   orig     best   curr\n"  );
 						for( int s = 0; s < s_max; s++ )
 						{
 							printf("%7.3f | ", snrs[s] );
-							printf("%8.6f %8.6f | ", org_FER[s], best_FER[s]);
-							printf("%8.6f %8.6f", org_BER[s], best_BER[s]);
+							printf("%8.6f %8.6f %8.6f    | ", org_FER[s], best_FER[s], curr_FER);
+							printf("%8.6f %8.6f %8.6f ",   org_BER[s], best_BER[s], curr_BER);
 							printf("\n");
 						}
-						printf("\n");
+						printf("\n--------\n");
                 }
 
                 mark_num++;

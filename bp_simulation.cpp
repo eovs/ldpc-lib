@@ -315,7 +315,7 @@ pair<double, double> bp_simulation(
 
 	if( dec_state )
 		decod_close( dec_state );
-
+	
 	dec_state = decod_open( decoder_type, 1, b, c, tailbite_length );
 	if( !dec_state )
 		die("Can't open decode");
