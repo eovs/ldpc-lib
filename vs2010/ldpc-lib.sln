@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ldpc-lib", "ldpc-lib.vcxproj", "{F7E20FE0-A707-8E78-446F-3C3818930B56}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ldpc-lib", "ldpc-lib.vcxproj", "{84F45B07-317D-0E7B-20A5-2BB19CD32E76}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,14 +11,14 @@ Global
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Debug|Win32.ActiveCfg = Debug|Win32
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Debug|Win32.Build.0 = Debug|Win32
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Debug|x64.ActiveCfg = Debug|x64
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Debug|x64.Build.0 = Debug|x64
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Release|Win32.ActiveCfg = Release|Win32
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Release|Win32.Build.0 = Release|Win32
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Release|x64.ActiveCfg = Release|x64
-		{F7E20FE0-A707-8E78-446F-3C3818930B56}.Release|x64.Build.0 = Release|x64
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Debug|Win32.ActiveCfg = Debug|Win32
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Debug|Win32.Build.0 = Debug|Win32
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Debug|x64.ActiveCfg = Debug|x64
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Debug|x64.Build.0 = Debug|x64
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Release|Win32.ActiveCfg = Release|Win32
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Release|Win32.Build.0 = Release|Win32
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Release|x64.ActiveCfg = Release|x64
+		{84F45B07-317D-0E7B-20A5-2BB19CD32E76}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -8,6 +8,8 @@
 #include <Windows.h>
 #endif	// WIN32
 
+#include "trace_pm.h"
+
 typedef struct
 {
 	int ncol;
@@ -32,6 +34,8 @@ typedef struct
 
 
 int random_codeword( matrix< int > const &mx, int tailbite_length, vector< bit > &codeword );
+static int trace_matrix( matrix<int> current_HM, vector<int> min_ACE, vector<int> max_ACE_spec, int M, int gtarget, vector<int> &ACE, vector<int> &girth_spectrum );
+static void show_matrix_property( vector<int> ACE, vector<int> girth_spectrum, int girth, int num );
 
 class scenario_based_code_generation : public ggp_function {
 private:
@@ -65,6 +69,12 @@ private: // state moved from run
         min_codes,          // min_codes
         max_codes,          // max_codes
         num_cycles;         // N
+	
+	    vector< int > min_ACE;
+		vector< int > max_SPEC;
+		int use_ACE;
+		int use_SPEC;
+
 		matrix< int > HM;
 		matrix< int > HM_orig;
 		double snr_for_selection;
@@ -140,6 +150,11 @@ public:
 		SetConsoleTextAttribute (hStdout,FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED );
 #endif
 		int punctured_blocks = 0;
+		int tarGirth = 0;
+		int tarACEbyACE   = 0;
+		int tarSPECbyACE  = 1000000;
+		int tarACEbySPEC  = 0;
+		int tarSPECbySPEC = 1000000;
         string prev_file_name = output_file_name(prev_length);
         ifstream prev_data(prev_file_name.c_str());
         if (prev_length != 0 && !prev_data) {
@@ -280,7 +295,7 @@ public:
             unsigned previous_ptr = 0;
             for ( ; iteration < num_cycles && codes_selected < max_codes; ++iteration) {
                 if (codes_tested_log_period > 0 && (iteration + 1) % codes_tested_log_period == 0) {
-                    cout << iteration + 1 << " tested" << endl;
+                    cout << iteration + 1 << " tested" << ", " << codes_selected << " selected" << endl;
                 }
                 int prev_elements = prev_length ? cumwcol[prev_length] : 0;
 
@@ -294,7 +309,8 @@ public:
                     previous_ptr = (previous_ptr + 1) % previous_modulo.size();
                 }
 
-                for (int internal = 0; internal < std::min(code_expansion_max_trials, m0); ++internal) {
+                for (int internal = 0; internal < std::min(code_expansion_max_trials, m0); ++internal) 
+				{
                     for (int i = prev_elements, i_max = (int) a.size(); i < i_max; ++i) {
                         if (mask[i] == 1) {
                             a[i] = next_random_int(0, tailbite_length);
@@ -314,7 +330,8 @@ public:
                     }
                     if (check.min_ok_modulo <= tailbite_length &&
                         (exact_tailbite == 0 || check.check_modulo(exact_tailbite))
-                    ) {
+                    ) 
+					{
 //------------------------------  check matrix --------------------------------------------
 						bool bad_matrix = false;
 						{
@@ -362,46 +379,128 @@ public:
 								bad_matrix = true;
 							} else if (codeword_exitcode > 0) {
 //								printf("Bad encoding\n");
+
 								bad_matrix = true;
 							}
 
+							if( !bad_matrix )
+							{
+								if( use_ACE | use_SPEC )
+								{
+									vector< int > ACE(GTARGET);
+									vector< int > SPEC(GTARGET);
+
+									int curr_girth = trace_matrix( current_HM, min_ACE, max_SPEC, tailbite_length, GTARGET, ACE, SPEC ); 
+
+									if( tarGirth > curr_girth ) 
+										bad_matrix = true;
+									else
+									{
+										bool bad_by_ACE  = false;
+										bool bad_by_SPEC = false;
+
+										if( use_ACE )
+										{
+											int n = min_ACE.size();
+											int bad_by_ACE = tarACEbyACE > ACE[0];
+
+											for( int k = 0; k < n; k++ )
+												bad_by_ACE |= ACE[k] < min_ACE[k];
+
+											if( !bad_by_ACE ) 
+											{
+												if( tarSPECbyACE * 1.3 < SPEC[0] ) 
+													bad_by_ACE = true;
+											}
+
+											if( !bad_by_ACE )
+											{
+												show_matrix_property( ACE, SPEC, curr_girth, min_ACE.size() );
+
+												if( tarACEbyACE < ACE[0] ) 
+												{	
+													tarGirth = curr_girth;
+													tarACEbyACE = ACE[0];
+													tarSPECbyACE = SPEC[0];
+
+													cout << "better ACE found!!! tarGirth: " << tarGirth << ", tarACE: " << tarACEbyACE << endl;
+												}
+											}
+										}
+
+										if( use_SPEC )
+										{
+											//cout << "ACE[0] " << ACE[0] << " SPEC[0] " << SPEC[0] << endl;
+
+											int n = max_SPEC.size();
+											int bad_by_SPEC = tarSPECbySPEC < SPEC[0];
+
+											for( int k = 0; k < n; k++ )
+												bad_by_SPEC |= SPEC[k] > max_SPEC[k];
+
+											if( !bad_by_SPEC ) 
+											{
+												//if( tarACEbySPEC * 0.15 > ACE[0] ) 	bad_by_SPEC = true;
+											}
+
+											if( !bad_by_SPEC )
+											{
+												show_matrix_property( ACE, SPEC, curr_girth, min_ACE.size() );
+
+
+												if( tarSPECbySPEC > SPEC[0] ) 
+												{	
+													tarGirth = curr_girth;
+													tarACEbySPEC = ACE[0];
+													tarSPECbySPEC = SPEC[0];
+
+													cout << "better SPEC found!!! tarGirth: " << tarGirth << ", tarSPEC: " << tarSPECbySPEC << endl;
+												}
+											}
+										}
+										bad_matrix = bad_by_ACE & bad_by_SPEC;
+									}
+								}
+							}
 						}
 //-----------------------------------------------------------------------------------------
 						if( !bad_matrix )
 						{
-                        settings result;
-						//===================================================================
-						mark_record.a = a;
-						mark_record.min_ok_modulo = check.min_ok_modulo;
-						vmark_record.push_back(mark_record);
-						//===================================================================
-                        result.open("min_modulo").set(check.min_ok_modulo);
-                        result.open("data").set(a);
-                        result.to_stream(curr_data);
-                        ++codes_selected;
-                        if (codes_selected_log_period && codes_selected % codes_selected_log_period == 0) {
-                            cout << codes_selected << " codes written to '" << curr_file_name << "'" << endl;
-                        }
-                        if (check.min_ok_modulo < m1) {
-                            m1 = check.min_ok_modulo;
-                            ofstream extra(extra_output_file.c_str(), std::ios_base::out | std::ios_base::app);
 
-                            ogroup(extra, cout) << " g=" << target_girth << " for M=" << m1;
-                            if (prev_length) {
-                                ogroup(extra, cout) << " from M=" << m0 << "\n";
-                            } else {
-                                ogroup(extra, cout) << "\n";
-                            }
+							settings result;
+							//===================================================================
+							mark_record.a = a;
+							mark_record.min_ok_modulo = check.min_ok_modulo;
+							vmark_record.push_back(mark_record);
+							//===================================================================
+							result.open("min_modulo").set(check.min_ok_modulo);
+							result.open("data").set(a);
+							result.to_stream(curr_data);
+							++codes_selected;
 
-                            for (int i = 0, i_max = (int) a.size(); i < i_max; ++i) {
-                                if (i > 0) {
-                                    extra << " ";
-                                }
-                                extra << a[i];
-                            }
-                            extra << endl;
-                        }
-                    }
+							if (codes_selected_log_period && codes_selected % codes_selected_log_period == 0) {
+								cout << codes_selected << " codes written to '" << curr_file_name << "'" << endl;
+							}
+							if (check.min_ok_modulo < m1) {
+								m1 = check.min_ok_modulo;
+								ofstream extra(extra_output_file.c_str(), std::ios_base::out | std::ios_base::app);
+
+								ogroup(extra, cout) << " g=" << target_girth << " for M=" << m1;
+	                            if (prev_length) {
+		                            ogroup(extra, cout) << " from M=" << m0 << "\n";
+			                    } else {
+				                    ogroup(extra, cout) << "\n";
+					            }
+
+						        for (int i = 0, i_max = (int) a.size(); i < i_max; ++i) {
+							        if (i > 0) {
+								        extra << " ";
+									}
+									extra << a[i];
+								}
+								extra << endl;
+							}
+						}
                     }
                     console_message_hook i_hook('i', "prints how many codes were tested",
                         format_to_string(" nb=%d, %d tested, %d found", starting_length, iteration + 1, codes_selected));
@@ -726,6 +825,10 @@ public:
         scenario.select("output_file_mask").cast_to(output_file_mask);
         scenario.select("extra_output_file").cast_to(extra_output_file);
         scenario.select("error_name").cast_to(error_name);
+
+		scenario.select("min_ace").cast_to(min_ACE);
+		scenario.select("max_ace_spec").cast_to(max_SPEC);
+
 //        scenario.select("modeling/config_file").cast_to(modeling_config_file);
 //        scenario.select("modeling/values_file").cast_to(modeling_values_file);
 //        scenario.select("modeling/additional_lines").cast_to(modeling_additional_lines);
@@ -760,6 +863,11 @@ simulation = {
 
         exact_tailbite *= tailbite_length;
         rows = columns = -1;
+
+		use_ACE  = min_ACE[0]  < 0 ? 0 : 1;
+		use_SPEC = max_SPEC[0] < 0 ? 0 : 1;
+		
+
 
         double best_metric = 1e9;
         for (unsigned i = 0, i_max = (unsigned int)input_codes.size(); i < i_max; ++i) {
@@ -990,5 +1098,97 @@ simulation = {
 
     virtual ~scenario_based_code_generation() {}
 };
+
+static int trace_matrix( matrix<int> current_HM, vector<int> min_ACE, vector<int> max_ACE_spec, int M, int gtarget, vector<int> &ACE, vector<int> &girth_spectrum )
+{
+	int i, j;
+	int girth;
+	ARRAY matr;
+	int S[GMAX];
+	int SA[GMAX];
+	int minACE[GMAX];
+	int maxACEspec[GMAX];
+	int HDrow = current_HM.n_rows();
+	int HDcol = current_HM.n_cols();
+	int gmax = GMAX;
+	int flag;
+	int t0 = min_ACE.size();
+	int t1 = max_ACE_spec.size();
+	int *minACE_ptr;
+	int *maxACEspec_ptr;
+
+	for( i = 0; i < GMAX; i++ ) S[i]  = 0;	
+	for( i = 0; i < GMAX; i++ ) SA[i] = 0;	
+	for( i = 0; i < GMAX; i++ ) minACE[i] = 0;	
+	for( i = 0; i < GMAX; i++ ) maxACEspec[i] = 100000000;	
+
+	if( t0 > GMAX ) 
+		t0 = GMAX;
+	for( i = 0; i < t0; i++ ) minACE[i] = min_ACE[i];	
+
+	if( t1 > GMAX ) 
+		t1 = GMAX;
+	for( i = 0; i < t1; i++ ) maxACEspec[i] = max_ACE_spec[i];	
+
+	matr.ndim = 2;
+
+	put_nrow( &matr, HDrow );
+	put_ncol( &matr, HDcol );
+	put_addr( &matr, Alloc2d_int( HDrow, HDcol ) );
+
+	for( i = 0; i < HDrow; i++ )
+		for( j = 0; j < HDcol; j++ )
+			matr.addr[i][j] = current_HM(i,j);
+
+	minACE_ptr     =     minACE[0] < 0 ? NULL : minACE;
+	maxACEspec_ptr = maxACEspec[0] < 0 ? NULL : maxACEspec;
+
+	flag = trace_bound_pol_mon_pm( matr, M, gmax, gtarget, S, SA, minACE_ptr, maxACEspec_ptr );
+
+	for( girth = 1; girth < GMAX+1; girth++ )
+	{
+		if( S[girth-1] )
+			break;
+	}
+
+	free( matr.addr );
+
+	for( int j = 0, i = girth-1; i < gmax; i++ )
+	{
+		if( SA[i] )
+		{
+			ACE[j++] = SA[i];
+			if( j == GTARGET ) break;
+		}
+	}
+
+	for( int j = 0, i = girth-1; i < gmax; i++ )
+	{
+		if( S[i] )
+		{
+			girth_spectrum[j++] = S[i];
+			if( j == GTARGET ) break;
+		}
+	}
+
+
+	return flag ? girth : -girth;
+}
+
+static void show_matrix_property( vector<int> ACE, vector<int> girth_spectrum, int girth, int num )
+{
+	printf("girth: %3d, ", girth);
+
+	printf("ACE: "); 
+
+	for( int i = 0; i < num; i++ )
+		printf("%3d ", ACE[i] ); 
+
+	printf(",  Girth_spectrum: "); 
+
+	for( int i = 0; i < num; i++ )
+		printf("%5d ", girth_spectrum[i] ); 
+	printf("\n");
+}
 
 #endif

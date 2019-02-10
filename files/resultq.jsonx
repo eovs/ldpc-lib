@@ -1,0 +1,163 @@
+{
+  results = array @"resultq_codes.jsonx"
+  settings = {
+    checking_columns = {
+      blocks = array {
+        {
+          height = 5
+          type = "unidiagonal"
+        }
+        {
+          type = "bidiagonal"
+        }
+      }
+      patches = array { }
+    }
+    decoder_name = "TDMP Advanced Sum-Product"
+    defaults = {
+      checking_columns = {
+        blocks = array {
+          {
+            height = 5
+            type = "unidiagonal"
+          }
+          {
+            type = "bidiagonal"
+          }
+        }
+        patches = array {
+          {
+            col = "14 15"
+            weight = 3
+          }
+        }
+      }
+      checking_columns_example_default = {
+        blocks = array {
+          {
+            type = "bidiagonal"
+          }
+        }
+      }
+      checking_columns_example_double = {
+        blocks = array {
+          {
+            height = 8
+            type = "bidiagonal"
+          }
+          {
+            special_column_span = 8
+            type = "bidiagonal"
+          }
+        }
+        patches = array {
+          {
+            col = "13 15"
+            weight = 3
+          }
+        }
+      }
+      codes_to_test = 6
+      columns = 32
+      decoder_type = 7
+      defaults = {
+        codes_to_test = 10
+        matrices_to_test = 1
+        modulation_type = 0
+        permutation_block = 128
+        permutation_inter = 1
+        permutation_type = 0
+        punctured_blocks = 0
+        random_seed = 0
+      }
+      error_blocks = 50
+      error_minimization = {
+        bad_code_tuning = array {
+          {
+            codes = 0
+            multiple = 2
+          }
+          {
+            codes = 2
+            multiple = 1
+          }
+        }
+        good_code_multiple = 1.25
+        name = "FER"
+        threshold = 1e-1
+      }
+      information_columns = {
+        possible_weights = array { 3 7 9 }
+        weight_constraints = array {
+          array { 3 5 5 }
+          array { 7 8 8 }
+          array { 9 3 3 }
+        }
+      }
+      information_columns_example_default = {
+        possible_weights = array { 2 3 14 }
+        weight_constraints = array {
+          array { 2 0 2 }
+          array { 14 3 4 }
+        }
+      }
+      information_columns_example_double = {
+        possible_weights = array { 2 3 14 }
+        weight_constraints = array {
+          array { 2 0 2 }
+          array { 14 3 4 }
+        }
+      }
+      matrices_to_test = 5
+      max_bp_iterations = 15
+      modulation_type = 0
+      num_codewords = 100000000
+      num_random_codes = 1000000
+      permutation_block = 128
+      permutation_inter = 1
+      permutation_type = 0
+      punctured_blocks = 0
+      random_seed = 1
+      row_constraints = {
+        possible_weights = array { 6 7 13 }
+        weight_constraints = array {
+          array { 6 8 8 }
+          array { 7 4 4 }
+          array { 13 4 4 }
+        }
+      }
+      row_constraints_example_default = {
+        possible_weights = array { 6 7 8 }
+      }
+      row_constraints_example_double = {
+        possible_weights = array { 6 7 8 }
+      }
+      rows = 16
+      snrs = array { 1.7 }
+      start_config_number = 0
+      target_girth = 8
+      target_tailbite_length = 126
+      trials = {
+        base_matrix = 100000
+        column = 200
+      }
+    }
+    information_columns = {
+      possible_weights = array { 3 7 9 }
+      weight_constraints = array {
+        array { 3 3 6 }
+        array { 7 7 9 }
+        array { 9 2 4 }
+      }
+    }
+    random_seed = 1
+    row_constraints = {
+      possible_weights = array { 6 7 13 }
+      weight_constraints = array {
+        array { 6 7 9 }
+        array { 7 3 5 }
+        array { 13 2 5 }
+      }
+    }
+  }
+}

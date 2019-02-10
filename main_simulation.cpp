@@ -26,8 +26,8 @@
 
 #include "3d_array.h"
 #include "trace_pm.h"
-#define GMAX 12
-#define GTARGET 2
+//#define GMAX 12
+//#define GTARGET 4
 
 #define DEFAULT_MARKING "skip"
 #define TARGET_ERR 0.01
@@ -129,11 +129,15 @@ static int trace_matrix( matrix<int> current_HM, int M, int gtarget, vector<int>
 	ARRAY matr;
 	int S[GMAX];
 	int SA[GMAX];
+	int minACE[GMAX];
+	int maxACEspec[GMAX];
 	int HDrow = current_HM.n_rows();
 	int HDcol = current_HM.n_cols();
 	int gmax = GMAX;
 	for( i = 0; i < GMAX; i++ ) S[i]  = 0;	
 	for( i = 0; i < GMAX; i++ ) SA[i] = 0;	
+	for( i = 0; i < GMAX; i++ ) minACE[i] = 0;	
+	for( i = 0; i < GMAX; i++ ) maxACEspec[i] = 100000000;	
 
 	matr.ndim = 2;
 
@@ -145,7 +149,7 @@ static int trace_matrix( matrix<int> current_HM, int M, int gtarget, vector<int>
 		for( j = 0; j < HDcol; j++ )
 			matr.addr[i][j] = current_HM(i,j);
 
-	trace_bound_pol_mon_pm( matr, M, gmax, gtarget, S, SA );
+	trace_bound_pol_mon_pm( matr, M, gmax, gtarget, S, SA, minACE, maxACEspec );
 
 	for( girth = 1; girth < GMAX+1; girth++ )
 	{
@@ -186,7 +190,7 @@ static void show_matrix_property( vector<int> ACE, vector<int> girth_spectrum, i
 	for( int i = 0; i < num; i++ )
 		printf("%3d ", ACE[i] ); 
 
-	printf(",  Girth_spectrum: "); 
+	printf(",  SPEC: "); 
 
 	for( int i = 0; i < num; i++ )
 		printf("%5d ", girth_spectrum[i] ); 

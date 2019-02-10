@@ -55,7 +55,7 @@ void copy_2D_to_3d_( ARRAY dst, ARRAY src )
 			y[i][j][0] = x[i][j];
 }
 
-void trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *S, int *SA )
+int trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *S, int *SA, int *minSA, int *maxS )
 {
 	int i, j;
 	int N;
@@ -77,6 +77,9 @@ void trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *S, int
 	ARRAY HP, HA;
 	ARRAY A, AC;
 	int cnt = 0;
+	int use_ACE      = minSA == NULL ? 0 : 1;
+	int use_ACE_spec = maxS  == NULL ? 0 : 1;
+	int matrix_OK = 1;
 
 	for( i = 0; i < gmax; i++ ) S[i] = 0;	// Spectrum
 	for( i = 0; i < gmax; i++ ) SA[i] = 0;	// Spectrum
@@ -242,12 +245,32 @@ void trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *S, int
 #endif
 		}
 
+		matrix_OK = 1;
+
 		if( S[d] > 0 )
 		{
+			matrix_OK = 0;
+
+			if( use_ACE_spec )
+			{
+				if( S[d] / (d+1) <= maxS[cnt] )
+				matrix_OK = 1;		// ACE spectrum is acceptable
+			}
+
+			if( use_ACE )
+			{
+				if( SA[d] / 2 >= minSA[cnt] )
+					matrix_OK = 1;		// ACE is acceptable
+			}
+
+			if( matrix_OK == 0 )
+				break;
+
 			cnt++;
 			if( cnt == gtarget )
 				break;
 		}
+
 	}
 
 	for( i = 3; i < gmax; i += 2 )
@@ -271,6 +294,8 @@ void trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *S, int
 	free_ARRAY( HA );
 	free_ARRAY( A );
 	free_ARRAY( AC );
+
+	return matrix_OK;
 }
 
 TANNER_MON_RES tanner_mon( ARRAY hd )

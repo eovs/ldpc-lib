@@ -129,6 +129,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\3d_array.cpp" />
     <ClCompile Include="..\base_matrix.cpp" />
     <ClCompile Include="..\bp_simulation.cpp" />
     <ClCompile Include="..\code_generation.cpp" />
@@ -152,6 +153,7 @@
     <ClCompile Include="..\search_ggp\random_extension.cpp" />
     <ClCompile Include="..\search_ggp\filter_codes.cpp" />
     <ClCompile Include="..\search_ggp\scenario_based_code_generation.cpp" />
+    <ClCompile Include="..\trace_pm.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\base_matrix.h" />

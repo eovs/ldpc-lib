@@ -5,6 +5,8 @@
 #include "3d_array.h"
 
 #define NATURAL_POLYNOM
+#define GMAX 20
+#define GTARGET 4
 
 typedef struct  
 {
@@ -46,7 +48,7 @@ typedef struct
 	int *ace;
 } POLYNOM; 
 
-void trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *SN, int *SA );
+int trace_bound_pol_mon_pm( ARRAY HD, int M, int gmax, int gtarget, int *SN, int *SA, int *minSA, int *maxS );
 TANNER_MON_RES tanner_mon( ARRAY HD );
 HP2A_MON_RES hp2a_mon_pm( ARRAY HD, ARRAY W, int M );
 
