@@ -74,6 +74,11 @@ private: // state moved from run
 		vector< int > max_SPEC;
 		int use_ACE;
 		int use_SPEC;
+		int q_mod;
+		matrix< int > HCM;        // HC modified
+		vector< int > coef_mask;  // the mask for HC matrix 
+		int all_col_2;            // all columns have weight equal to 2
+		int bidiagonalFlag;		  // check matrix is bidiagonal
 
 		matrix< int > HM;
 		matrix< int > HM_orig;
@@ -122,6 +127,55 @@ private:
 				return true;
 		}
 		return false;
+	}
+
+	void improve_coefs( vector< int > &coefs, int bidiagonalFlag, int all_w2, int rows, int q_mod )
+	{
+		if( bidiagonalFlag )
+		{
+			for( int i = 0; i < rows-1; i++ )
+				coefs[i*2+1] = coefs[i*2];
+		}
+
+		if( all_w2 )
+		{
+			if( coefs[rows*2] == coefs[rows*2+1] )
+				coefs[rows*2+1] = (coefs[rows*2+1] + 1) % q_mod;
+		}
+	}
+
+
+	int check_bidiagonal( matrix< int > matr )
+	{
+		int rows = matr.n_rows();
+		int flag = 1;
+
+		for( int i = 0; i < rows-1; i++ ) 
+		{
+			int w = 0;
+			for( int j = 0; j < rows; j++ )
+				w += matr(i, j) != -1;
+
+			if( w != 2 )
+			{
+				bidiagonalFlag = 0;
+				break;
+			}
+
+			if( matr(i,i) != 0 )
+			{
+				bidiagonalFlag = 0;
+				break;
+			}
+
+			if( matr(i+1,i) != 0 )
+			{
+				bidiagonalFlag = 0;
+				break;
+			}
+		}
+
+		return flag;
 	}
 
 public:
@@ -265,6 +319,9 @@ public:
 
         vector< int > a(first_equations_base_edges);
         vector< int > as(second_equations_base_edges);
+
+		vector< int > coef(first_equations_base_edges);    // used for non-binary codes only 
+
         int m1 = tailbite_length;
 
         cout << endl << " Press 'x' to stop, 'i' for info" << endl;
@@ -321,7 +378,28 @@ public:
                     for (int i = 0, i_max = (int) as.size(); i < i_max; ++i) {
                         as[i] = a[nonzero_mapping[i]];
                     }
-                    voltage_check_result check = first_equations.check_voltages(a, tailbite_length);
+
+                    if( q_mod > 2 )
+					{
+						for (int i = prev_elements, i_max = (int) a.size(); i < i_max; ++i) {
+							if (coef_mask[i] == 1) {
+								coef[i] = next_random_int(0, q_mod);
+							} else {
+								coef[i] = 0;
+							}
+						}
+
+						improve_coefs( coef, bidiagonalFlag, all_col_2, rows, q_mod );
+					}
+
+                    voltage_check_result check;
+					
+					if( q_mod == 2 )
+						check = first_equations.check_voltages(a, tailbite_length);
+					else
+						check = first_equations.check_voltages_and_coefs(a, tailbite_length, coef, q_mod);
+
+
                     if (subcode_girth > target_girth &&
                         check.min_ok_modulo <= tailbite_length &&
                         (exact_tailbite == 0 || check.check_modulo(exact_tailbite))
@@ -801,7 +879,8 @@ public:
         return true;
     }
 
-    virtual void run(ggp_state &) {
+    virtual void run(ggp_state &) 
+	{
         bool continue_existing;
         vector<settings> input_codes;
         string output_file_mask;
@@ -828,6 +907,8 @@ public:
 
 		scenario.select("min_ace").cast_to(min_ACE);
 		scenario.select("max_ace_spec").cast_to(max_SPEC);
+
+		scenario.select("q_mod").cast_to(q_mod);
 
 //        scenario.select("modeling/config_file").cast_to(modeling_config_file);
 //        scenario.select("modeling/values_file").cast_to(modeling_values_file);
@@ -907,23 +988,49 @@ simulation = {
             }
         }
         vector< int > original_values;
-        if (is_raw_matrix) {
-            for (int c = 0; c < columns; ++c) {
-                for (int r = 0; r < rows; ++r) {
+        if (is_raw_matrix) 
+		{
+			for (int c = 0; c < columns; ++c) 
+			{
+                for (int r = 0; r < rows; ++r) 
+				{
                     int cur = HM(r, c);
-                    if (cur < 0) {
+                    if (cur < 0) 
+					{
                         HM(r, c) = 0;
-                    } else {
+                    } 
+					else 
+					{
                         original_values.push_back(cur);
-                        if (cur == 0) {
+                        if (cur == 0) 
+						{
                             HM(r, c) = 2;
-                        } else {
+                        } 
+						else 
+						{
                             HM(r, c) = 1;
                         }
                     }
                 }
             }
-        }
+
+			if( q_mod > 2 )
+			{
+				HCM = HM_orig;
+				for (int c = 0; c < columns; ++c) 
+				{
+					for (int r = 0; r < rows; ++r) 
+					{
+						if( HCM(r, c) < 0 ) 
+							HCM(r, c) = 0;
+						else 
+							HCM(r, c) = 1;
+					}
+				}
+			}
+		}
+		else
+			cout << "is not raw matrix" << endl;
 
         wcol = vector< int >(columns);
         cumwcol = vector< int >(columns + 1);
@@ -934,6 +1041,13 @@ simulation = {
             cumwcol[i + 1] = cumwcol[i] + wcol[i];
         }
 
+		all_col_2 = 1;
+		for( int i = 0; i < columns; i++ ) 
+		{
+			if( wcol[i] != 2 )
+				all_col_2 = 0;
+		}
+
         mask = vector< int >();
         for (int i = 0; i < columns; ++i) {
             for (int j = 0; j < rows; ++j) {
@@ -943,7 +1057,22 @@ simulation = {
             }
         }
 
-        if (!continue_existing) {
+		if( q_mod > 2 )
+		{
+			coef_mask = vector< int >();
+			for (int i = 0; i < columns; ++i) 
+			{
+				for (int j = 0; j < rows; ++j) {
+					if (HCM(j, i) > 0) {
+						coef_mask.push_back(HCM(j, i));
+					}
+				}
+			}
+		}
+
+		bidiagonalFlag = check_bidiagonal( HM_orig );
+
+		if (!continue_existing) {
             if (!single_iteration(0, "interrupts initial code generation", " codes selected, ",
                                   " tested", 100000, 1000, 1, 0)) {
                 return;

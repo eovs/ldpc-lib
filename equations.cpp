@@ -147,7 +147,8 @@ int equation_builder::tree_girth() const {
 
 equation_builder::~equation_builder() {}
 
-voltage_check_result equation_builder::check_voltages(
+voltage_check_result equation_builder::check_voltages
+(
     vector< int > const &voltages,
     int max_modulo
 ) const {
@@ -190,4 +191,67 @@ voltage_check_result equation_builder::check_voltages(
         ++rv.min_ok_modulo;
     }
     return rv;
+}
+
+
+voltage_check_result equation_builder::check_voltages_and_coefs
+(
+ vector< int > const &voltages,
+ int max_modulo,
+ vector< int > const &coef,
+ int m_mod
+ ) const 
+{
+	 voltage_check_result rv;
+	 // 1. Filling up the nodes.
+	 vector< int > values(tree.size());
+	 for (int i = 1, i_max = (int) tree.size(); i < i_max; ++i) 
+	 {
+		 result_tree_node const &curr = tree[i];
+		 if (curr.parent == 0) 
+		 {
+			 // a root in one of the trees
+			 values[i] = 0;
+		 } 
+		 else 
+			 if (curr.negative) 
+			 {
+				values[i] = values[curr.parent] - voltages[curr.edge_id];
+			 } 
+			 else 
+			 {
+				values[i] = values[curr.parent] + voltages[curr.edge_id];
+			 }
+	 }
+
+	 // 2. Testing the equations.
+	 int num_failed = 0;
+	 for (int i = 0, i_max = (int) equations.size(); i < i_max; ++i) 
+	 {
+		 int sum = values[equations[i].first] - values[equations[i].second];
+		 if (sum == 0) 
+		 {
+			 // An identity zero found.
+			 rv.first_failed_equation = num_failed;
+			 return rv;
+		 }
+	 }
+	 rv.first_failed_equation = -1;
+	 // 3. Collecting failing modulos.
+	 for (int i = 0, i_max = (int) equations.size(); i < i_max; ++i) 
+	 {
+		 int sum = std::abs(values[equations[i].first] - values[equations[i].second]);
+		 vector< int > const &divs = divisors(sum);
+		 for (int j = 0, j_max = (int) divs.size(); j < j_max && divs[j] <= max_modulo; ++j) 
+		 {
+			 rv.failed_modulos.insert(divs[j]);
+		 }
+	 }
+	 rv.max_nonok_modulo = rv.failed_modulos.size() > 0 ? *(rv.failed_modulos.rbegin()) : 1;
+	 rv.min_ok_modulo = 2;
+	 while (rv.failed_modulos.count(rv.min_ok_modulo) > 0) 
+	 {
+		 ++rv.min_ok_modulo;
+	 }
+	 return rv;
 }

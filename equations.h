@@ -50,6 +50,8 @@ public:
     int tree_girth() const;
     voltage_check_result check_voltages(std::vector< int > const &voltages,
                                         int max_modulo = std::numeric_limits< int >::max()) const;
+	voltage_check_result check_voltages_and_coefs(std::vector< int > const &voltages,
+		int max_modulo, std::vector< int > const &coef, int qmod ) const;
     virtual ~equation_builder();
 };
 
