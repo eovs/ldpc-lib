@@ -29,6 +29,7 @@ typedef struct
 typedef struct
 {
 	vector< int > a;
+	vector< int > coef;
 	int min_ok_modulo;
 }MARK_RECORD;
 
@@ -332,6 +333,7 @@ public:
             console_exception_hook x_hook('x', interrupt_info_message, local_interruption_exception());
             vector< int > previous_modulo;
             vector< vector<int> > previous_codes;
+			vector< vector<int> > previous_coefs;
             if (prev_length) {
                 while (true) {
                     settings current = settings::from_stream(prev_data);
@@ -347,6 +349,13 @@ public:
                     current.select("data").cast_to(current_data);
                     previous_modulo.push_back(m0);
                     previous_codes.push_back(current_data);
+
+					if( q_mod > 2 )
+					{
+						vector<int> current_coefs;
+						current.select("coef").cast_to(current_coefs);
+						previous_coefs.push_back(current_coefs);
+					}
                 }
             }
             unsigned previous_ptr = 0;
@@ -357,12 +366,22 @@ public:
                 int prev_elements = prev_length ? cumwcol[prev_length] : 0;
 
                 int m0 = 1000000000;
-                if (prev_length) {
+                if (prev_length) 
+				{
                     m0 = previous_modulo[previous_ptr];
                     vector< int > &previous_v = previous_codes[previous_ptr];
                     for (int i = 0; i < prev_elements; ++i) {
                         a[i] = previous_v[i];
                     }
+
+					if( q_mod > 2 )
+					{
+						vector< int > &previous_c = previous_coefs[previous_ptr];
+						for (int i = 0; i < prev_elements; ++i) {
+							coef[i] = previous_c[i];
+						}
+					}
+
                     previous_ptr = (previous_ptr + 1) % previous_modulo.size();
                 }
 
@@ -403,7 +422,8 @@ public:
                     if (subcode_girth > target_girth &&
                         check.min_ok_modulo <= tailbite_length &&
                         (exact_tailbite == 0 || check.check_modulo(exact_tailbite))
-                    ) {
+                    ) 
+					{
                         check = second_equations.check_voltages(as, tailbite_length);
                     }
                     if (check.min_ok_modulo <= tailbite_length &&
@@ -420,6 +440,8 @@ public:
 							mark_param.size = (int)a.size();
 
 							matrix<int> current_HM(rows,starting_length);
+							matrix<int> current_HC(rows,starting_length);
+
 							// get part of original matrix
 							for( int i = 0; i < mark_param.nrow; i++ )
 							{
@@ -438,9 +460,37 @@ public:
 								}
 							}
 
-							vector< bit > codeword;
-							int codeword_exitcode = random_codeword(current_HM, tailbite_length, codeword);
+                            if( q_mod > 2 )
+							{
+								// get part of original matrix
+								for( int i = 0; i < mark_param.nrow; i++ )
+								{
+									for( int j = 0; j < mark_param.ncol; j++ )
+									{
+										current_HC(i,j) = HM_orig(i,j);     // ????????????????????????????????????????
+									}
+								}
+								// use current mark
+								for (int i = 0, k = 0; i < mark_param.ncol && k < mark_param.size; i++)
+								{
+									for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
+									{
+										if (current_HC(j, i) != -1)
+											current_HC(j, i) = coef[k++];
+									}
+								}
+							}
 
+							vector< bit > codeword;
+							int codeword_exitcode;
+							if( q_mod > 2 )
+							{
+								codeword_exitcode = 0;
+							}
+							else
+							{
+								codeword_exitcode = random_codeword(current_HM, tailbite_length, codeword);
+							}
 							if (codeword_exitcode < 0) {
 #if 0
 								printf("Bad matrix\n");
@@ -549,11 +599,18 @@ public:
 							//===================================================================
 							mark_record.a = a;
 							mark_record.min_ok_modulo = check.min_ok_modulo;
+							if( q_mod > 2 )
+								mark_record.coef = coef;
 							vmark_record.push_back(mark_record);
 							//===================================================================
 							result.open("min_modulo").set(check.min_ok_modulo);
 							result.open("data").set(a);
+						
+							if( q_mod > 2 )
+								result.open("coef").set(coef);
+
 							result.to_stream(curr_data);
+
 							++codes_selected;
 
 							if (codes_selected_log_period && codes_selected % codes_selected_log_period == 0) {
@@ -631,6 +688,8 @@ public:
 					mark_param.size = (unsigned int)a.size();
 
 					matrix<int> current_HM(rows,columns);
+					matrix<int> current_HC(rows,columns);
+
 					// get part of original matrix
 					for( int i = 0; i < mark_param.nrow; i++ )
 					{
@@ -648,6 +707,27 @@ public:
 								current_HM(j, i) = a[k++];
 						}
 					}
+
+					if( q_mod > 2 )
+					{
+						// get part of original matrix
+						for( int i = 0; i < mark_param.nrow; i++ )
+						{
+							for( int j = 0; j < mark_param.ncol; j++ )
+							{
+								current_HC(i,j) = HM_orig(i,j);  // ?????????????????????????
+							}
+						}
+						// use current mark
+						for (int i = 0, k = 0; i < mark_param.ncol && k < mark_param.size; i++)
+						{
+							for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
+							{
+								if (current_HC(j, i) != -1)
+									current_HC(j, i) = coef[k++];
+							}
+						}
+					}
 					
 					double best_fer = 10.0;
 					double snr = start_snr_for_estimation;
@@ -656,7 +736,9 @@ public:
 					{
 						//reset_random(); // all codes are tested with same noise
 						bp_result = bp_simulation(
+							            q_mod,
 										current_HM,
+										current_HC,
 										tailbite_length,
 										number_of_iterations,	//num_bp_iterations,
 										number_of_err_blocks,	//num_frame_errors,
@@ -704,6 +786,8 @@ public:
 					mark_param.size = (unsigned int)a.size();
 
 					matrix<int> current_HM(rows,columns);
+					matrix<int> current_HC(rows,columns);
+
 					// get part of original matrix
 					for( int i = 0; i < mark_param.nrow; i++ )
 					{
@@ -722,9 +806,32 @@ public:
 						}
 					}
 
+					if( q_mod > 2 )
+					{
+						// get part of original matrix
+						for( int i = 0; i < mark_param.nrow; i++ )
+						{
+							for( int j = 0; j < mark_param.ncol; j++ )
+							{
+								current_HC(i,j) = HM_orig(i,j);///// ?????????????????????????????
+							}
+						}
+						// use current mark
+						for (int i = 0, k = 0; i < mark_param.ncol && k < mark_param.size; i++)
+						{
+							for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
+							{
+								if (current_HC(j, i) != -1)
+									current_HC(j, i) = coef[k++];
+							}
+						}
+					}
+
 					reset_random(); // all codes are tested with same noise
 					bp_result = bp_simulation(
+						                q_mod,
 										current_HM,
+										current_HC,
 										tailbite_length,
 										number_of_iterations,		//num_bp_iterations,
 										number_of_err_blocks,		//num_frame_errors,
@@ -752,7 +859,9 @@ public:
 							cout << " SNR reestimaition :  " << snr_for_selection << endl;
 							//reset_random(); // all codes are tested with same noise
 							bp_result = bp_simulation(
+								        q_mod,
 										current_HM,
+										current_HC,
 										tailbite_length,
 										number_of_iterations,		//num_bp_iterations,
 										number_of_err_blocks,		//num_frame_errors,
@@ -945,8 +1054,16 @@ simulation = {
         exact_tailbite *= tailbite_length;
         rows = columns = -1;
 
-		use_ACE  = min_ACE[0]  < 0 ? 0 : 1;
-		use_SPEC = max_SPEC[0] < 0 ? 0 : 1;
+		if( q_mod <= 2 )
+		{
+			use_ACE  = min_ACE[0]  < 0 ? 0 : 1;
+			use_SPEC = max_SPEC[0] < 0 ? 0 : 1;
+		}
+		else
+		{
+			use_ACE  = 0;
+			use_SPEC = 0;
+		}
 		
 
 

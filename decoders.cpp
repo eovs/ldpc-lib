@@ -37,7 +37,7 @@ typedef struct
 
 #define SUM_PROD_GFQ_ORIG
 
-//#define   COLUMN_BY_COLUMN
+#define   COLUMN_BY_COLUMN
 
 
 #ifndef SUM_PROD_GFQ_ORIG
@@ -70,8 +70,8 @@ typedef struct
 #define ONE_TMP (1 << TMP_FPP)
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#define QMAX  256
-#define RWMAX 64
+#define QMAX  1024
+#define RWMAX 1024
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -622,11 +622,11 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 		if( !st->fht_rw )
 			return NULL;
 
-		st->fht_list = (int*)calloc(st->q, sizeof(st->fht_list[0]) );
+		st->fht_list = (int*)calloc(st->q+1, sizeof(st->fht_list[0]) );
 		if( !st->fht_list )
 			return NULL;
 
-		st->fht_ilist = (int*)calloc(st->q, sizeof(st->fht_ilist[0]) );
+		st->fht_ilist = (int*)calloc(st->q+1, sizeof(st->fht_ilist[0]) );
 		if( !st->fht_ilist )
 			return NULL;
 
@@ -642,13 +642,15 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 		if( !st->fht_smask )
 			return NULL;
 
-		st->fht_hb_ci = Alloc2d_short(nh*M, 2 );
+//		st->fht_hb_ci = Alloc2d_short(nh*M, 2 );
+		st->fht_hb_ci = Alloc2d_short(nh*M, mh );
 		if( st->fht_hb_ci==NULL)
 			return NULL;
 
-		st->fht_hb_cj = Alloc2d_short(st->nh, 2 );
-		if( st->fht_hb_cj==NULL)
-			return 0;
+//		st->fht_hb_cj = Alloc2d_short(st->nh, 2 );
+//		st->fht_hb_cj = Alloc2d_short(st->nh, mh );
+//		if( st->fht_hb_cj==NULL)
+//			return 0;
 
 		st->fht_soft_out = Alloc2d_double(st->q, N );
 		if( st->fht_soft_out==NULL)
@@ -661,6 +663,8 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 		st->fht_buf1 = Alloc2d_double(st->q, M );
 		if( st->fht_buf1==NULL)
 			return NULL;
+
+		st->fht_cw = (short*)calloc(st->nh, sizeof(st->fht_cw[0]) );
 		break;
 
 	case TASP_DEC:
@@ -797,7 +801,7 @@ int find_row_weight( short *hb[], int rh, int nh, int rw[] )
 }
 
 
-int find_column_weight( short *hb[], int rh, int nh, short *hb_ri[] )
+int find_column_weight( short *hb[], int rh, int nh, short *hb_ri[], short cw[] )
 {
 	int i, j;
 
@@ -807,6 +811,8 @@ int find_column_weight( short *hb[], int rh, int nh, short *hb_ri[] )
 		int cnt = 0;
 		for( j = 0; j < rh; j++ )
 			cnt += hb[j][i] != -1;
+
+		cw[i] = cnt;
 
 		if( cnt != 2 )
 			all_cw2 = 0;
@@ -825,7 +831,7 @@ int find_column_weight( short *hb[], int rh, int nh, short *hb_ri[] )
 }
 
 
-int find_list_of_symbols( int q, short *hc[], int rh, int nh, int list[], int ilist[] )
+int find_list_of_symbols( int q, short *hb[], short *hc[], int rh, int nh, int list[], int ilist[] )
 {
 	int i, j;
 
@@ -836,17 +842,19 @@ int find_list_of_symbols( int q, short *hc[], int rh, int nh, int list[], int il
 	{
 		for( j = 0; j < nh; j++ )
 		{
-			int val = hc[i][j];
-
-			if( val != -1 )
-			{
-				list[val] = 1;
+			if( hb[i][j] >= 0 && hc[i][j] >= 0 )
+			{ 
+				int val = hc[i][j];
+				if( val > 0 )
+					list[val] = 1;
+				else
+					list[q] = 1;
 			}
 		}
 	}
 
 	j = 0;
-	for( i = 0; i < q; i++ )
+	for( i = 0; i <= q; i++ )
 	{
 		if( list[i] )
 		{
@@ -861,6 +869,7 @@ int find_list_of_symbols( int q, short *hc[], int rh, int nh, int list[], int il
 
 int prepare_mul_tab
 (
+     short *hb[],
 	 short *hc[], 
 	 int rh, 
 	 int nh, 
@@ -886,11 +895,9 @@ int prepare_mul_tab
 		int cnt = 0;
 		for( j = 0; j < nh; j++ )
 		{
-			int val = hc[i][j];
-
-			if( val != -1 )
+			if( hb[i][j] >= 0 && hc[i][j] >= 0 )
 			{
-				hc_rl[i][cnt++] = list[val];
+				hc_rl[i][cnt++] = list[hc[i][j]];
 			}
 		}
 		hc_rl[i][cnt] = -1;
@@ -1072,11 +1079,11 @@ int decod_init( void *state )
 
 		prepare_row_indexes( st->hb, st->rh, st->nh, st->fht_hb_ri );
 
-		st->fht_all_cw_2 = find_column_weight( st->hb, st->rh, st->nh, st->fht_hb_ci );
+		st->fht_all_cw_2 = find_column_weight( st->hb, st->rh, st->nh, st->fht_hb_ci, st->fht_cw );
 
 
-		if( st->fht_all_cw_2 == 0 )
-			return 0;
+//		if( st->fht_all_cw_2 == 0 )
+//			return 0;
 
 		st->fht_soft_in = Alloc2d_double(st->q, st->rh * st->m * st->max_rw );
 		if( st->fht_soft_in==NULL)
@@ -1090,9 +1097,9 @@ int decod_init( void *state )
 		if( st->fht_hc_rl==NULL)
 			return 0;
 
-		prepare_cj( st->hb, st->rh, st->nh, st->fht_hb_cj );
+//		prepare_cj( st->hb, st->rh, st->nh, st->fht_hb_cj );
 
-		st->fht_ilist_size = find_list_of_symbols(st->q, st->hc, st->rh, st->nh, st->fht_list, st->fht_ilist );
+		st->fht_ilist_size = find_list_of_symbols(st->q, st->hb, st->hc, st->rh, st->nh, st->fht_list, st->fht_ilist );
 		prepare_HAD( st->q_bits, st->fht_HAD );
 
 #ifdef ORIG_TABLES
@@ -1108,7 +1115,7 @@ int decod_init( void *state )
 		gf2log  = (short*)calloc( st->q, sizeof(short) );
 		gf2alog = (short*)calloc( st->q, sizeof(short) );
 
-		prepare_mul_tab( st->hc, st->rh, st->nh, st->fht_list, st->fht_hc_rl, st->q_bits, gf2log, gf2alog, st->fht_t, st->fht_ti, st->fht_ilist, st->fht_ilist_size );
+		prepare_mul_tab( st->hb, st->hc, st->rh, st->nh, st->fht_list, st->fht_hc_rl, st->q_bits, gf2log, gf2alog, st->fht_t, st->fht_ti, st->fht_ilist, st->fht_ilist_size );
 
 		free( gf2log );
 		free( gf2alog );
@@ -1281,14 +1288,15 @@ void decod_close( DEC_STATE* st )
 		if( st->fht_hb_ci )    { free2d_short( st->fht_hb_ci );     st->fht_hb_ci    = NULL; }
 		if( st->fht_hb_ri )    { free2d_short( st->fht_hb_ri );     st->fht_hb_ri    = NULL; }
 		if( st->fht_hc_rl )    { free2d_short( st->fht_hc_rl );     st->fht_hc_rl    = NULL; }
-		if( st->fht_hb_cj )    { free2d_short( st->fht_hb_cj );     st->fht_hb_cj    = NULL; }
+//		if( st->fht_hb_cj )    { free2d_short( st->fht_hb_cj );     st->fht_hb_cj    = NULL; }
 		if( st->fht_t )        { free2d_short( st->fht_t );         st->fht_t        = NULL; }
 		if( st->fht_ti )       { free2d_short( st->fht_ti );        st->fht_ti       = NULL; }
 		if( st->fht_soft_in )  { free2d_double( st->fht_soft_in );  st->fht_soft_in  = NULL; }
 		if( st->fht_soft_outs ){ free2d_double( st->fht_soft_outs );st->fht_soft_outs= NULL; }
 		if( st->fht_soft_out ) { free2d_double( st->fht_soft_out ); st->fht_soft_out = NULL; }
-		if( st->fht_buf0 )     { free2d_double( st->fht_buf0 );     st->fht_buf0   = NULL; }
-		if( st->fht_buf1 )     { free2d_double( st->fht_buf1 );     st->fht_buf1   = NULL; }
+		if( st->fht_buf0 )     { free2d_double( st->fht_buf0 );     st->fht_buf0     = NULL; }
+		if( st->fht_buf1 )     { free2d_double( st->fht_buf1 );     st->fht_buf1     = NULL; }
+		if( st->fht_cw )       { free( st->fht_cw );                st->fht_cw       = NULL; }
 		break;
 
 	case TASP_DEC:
@@ -6001,6 +6009,8 @@ void  map_graph
 #else
 				soft_outs[i][idx] = s[ mul[rl[j]][i] ] * qinv;
 #endif
+				if( soft_outs[i][idx] < 0.00001 )
+					soft_outs[i][idx] = 0.00001;
 			}
 		}
 
@@ -6664,8 +6674,9 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 	short *synd = st->syndr;
 	short *buf = st->fht_buf;
 	short **hb_ri = st->fht_hb_ri; 
-	short **hb_ci = st->fht_hb_ci; 
-	short **hb_cj = st->fht_hb_cj;
+	short **hb_ci = st->fht_hb_ci;			// hb_ci[i][j] - positions of coef in i-th columns
+	short *col_weight = st->fht_cw;			// col_weight[i] - column weight
+//	short **hb_cj = st->fht_hb_cj;
 	short **mul_tab = st->fht_t;
 	short **div_tab = st->fht_ti;
 	double **soft_in  = st->fht_soft_in;
@@ -6689,8 +6700,8 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 	int r = rg;
 	int use_p_thr = p_thr == 0 ? 0 : 1;
 
-	if( cw2 == 0 )
-		return -1;
+//	if( cw2 == 0 )
+//		return -1;
 
 
 	// Initialize each constituent code symbol by its input soft data 
@@ -6834,8 +6845,8 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 		{
 			int pos_r = j * m;
 			int weight = rweight[j];
-			static short mask[1024] = {0};
-			static short hard[1024] = {0};
+			static short mask[1024];// = {0};  // NOTE : 1023 nonzero elements in the row
+			static short hard[1024];// = {0};
 
 			for( k = 0; k < m; k++ )
 			{
@@ -6854,6 +6865,8 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 							mask[ii] = smask[pos_n];
 						hard[ii] = qhard[pos_n];
 					}
+					mask[ii] = 0;
+					hard[ii] = 0;
 				}
 
 #ifndef SOFT_IN_OUTS
@@ -6922,127 +6935,294 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 
 
 #ifdef COLUMN_BY_COLUMN
-		for( i = 0; i < nh; i++ )
+		if( cw2 )
 		{
-			static double bf0[1024];
-			static double bf1[1024];
-			int pos_n = i * m;
-			int row0 = hb_ci[i][0];
-			int row1 = hb_ci[i][1];
-			int circ0 = hb[row0][i];
-			int circ1 = hb[row1][i];
-			int ph0 = posh[row0];
-			int ph1 = posh[row1];
-			int pos_r0 = row0*m;
-			int pos_r1 = row1*m;
-			int index0 = ph0*r + pos_r0;
-			int index1 = ph1*r + pos_r1;
-
-			int kkk0 = (m - circ0) % m;
-			int kkk1 = (m - circ1) % m;
-
-			for( k = 0; k < m; k++ )
+			for( i = 0; i < nh; i++ )
 			{
-				int ii = pos_n + k;
-				double a, b, c;
+				static double bf0[1024*4];
+				static double bf1[1024*4];
+				int pos_n = i * m;
+				int row0 = hb_ci[i][0];
+				int row1 = hb_ci[i][1];
+				int circ0 = hb[row0][i];
+				int circ1 = hb[row1][i];
+				int ph0 = posh[row0];
+				int ph1 = posh[row1];
+				int pos_r0 = row0*m;
+				int pos_r1 = row1*m;
+				int index0 = ph0*r + pos_r0;
+				int index1 = ph1*r + pos_r1;
 
-#ifdef MAKE_DUMP
-//				fprintf(fdump, "%4d mask = %1d\n", dcmp, smask[ii] );				
-				fprintf(fdump, "soft_out %8d\n", ii+1);
-#endif
+				int kkk0 = (m - circ0) % m;
+				int kkk1 = (m - circ1) % m;
 
-				if( kkk0 == m )
-					kkk0 = 0;
-
-				if( kkk1 == m )
-					kkk1 = 0;
-
-				if( use_p_thr & smask[ii] )
+				for( k = 0; k < m; k++ )
 				{
-					for( j = 0; j < q; j++ )	soft_out[j][ii] = soft[j][ii];
-#ifdef MAKE_DUMP
-					for( j = 0; j < q; j++ )
-						fprintf(fdump, "%8.6f ", soft_out[j][ii] );
-					fprintf(fdump, "\n");
+					int ii = pos_n + k;
+					double a, b, c;
+
+	#ifdef MAKE_DUMP
+	//				fprintf(fdump, "%4d mask = %1d\n", dcmp, smask[ii] );				
+					fprintf(fdump, "soft_out %8d\n", ii+1);
+	#endif
+
+					if( kkk0 == m )
+						kkk0 = 0;
+
+					if( kkk1 == m )
+						kkk1 = 0;
+
+					if( use_p_thr & smask[ii] )
+					{
+						for( j = 0; j < q; j++ )	soft_out[j][ii] = soft[j][ii];
+	#ifdef MAKE_DUMP
+						for( j = 0; j < q; j++ )
+							fprintf(fdump, "%8.6f ", soft_out[j][ii] );
+						fprintf(fdump, "\n");
+	#endif
+					}
+					else
+					{
+						for( j = 0; j < q; j++ )
+						{
+	#ifndef SOFT_IN_OUTS
+							double b0 = soft_outs[j][index0 + kkk0];
+							double b1 = soft_outs[j][index1 + kkk1];
+	#else
+							double b0 = soft_in[j][index0 + kkk0];
+							double b1 = soft_in[j][index1 + kkk1];
+	#endif
+							double x = soft[j][ii];
+							double y0 = x * b0;
+							double y1 = x * b1;
+								
+							bf0[j] = y1;
+							bf1[j] = y0;
+							soft_out[j][ii] = y1 * b0;
+						}
+
+						a = 0;
+
+						for( j = 0; j < q; j++ )
+							a += soft_out[j][ii];
+	#ifdef MAKE_DUMP
+						for( j = 0; j < q; j++ )
+							fprintf(fdump, "%8.6f ", soft_out[j][ii] );
+						fprintf(fdump, "\n");
+	#endif
+						a = 1.0 / a;
+						for( j = 0; j < q; j++ )
+							soft_out[j][ii] *= a;
+
+						c = b = 0;
+
+						for( j = 0; j < q; j++ )
+						{
+							b += bf0[j];
+							c += bf1[j];
+						}
+	#ifdef MAKE_DUMP
+						fprintf(fdump, "soft_in\n");
+						for( j = 0; j < q; j++ )
+							fprintf(fdump, "%8.6f ", bf0[j] );
+						fprintf(fdump, "\n");
+
+						fprintf(fdump, "soft_in\n");
+						for( j = 0; j < q; j++ )
+							fprintf(fdump, "%8.6f ", bf1[j] );
+						fprintf(fdump, "\n");
 #endif
+						b = 1.0 / b;
+						c = 1.0 / c;
+						for( j = 0; j < q; j++ )
+						{
+							bf0[j] *= b;
+							bf1[j] *= c;
+						}
+
+						for( j = 0; j < q; j++ )
+						{
+							soft_in[j][index0 + kkk0] = bf0[j];
+							soft_in[j][index1 + kkk1] = bf1[j];
+						}
+					}
+
+					kkk0++;
+					kkk1++;
+
+					dcmp++;
 				}
-				else
-				{
-					for( j = 0; j < q; j++ )
-					{
-#ifndef SOFT_IN_OUTS
-						double b0 = soft_outs[j][index0 + kkk0];
-						double b1 = soft_outs[j][index1 + kkk1];
-#else
-						double b0 = soft_in[j][index0 + kkk0];
-						double b1 = soft_in[j][index1 + kkk1];
-#endif
-						double x = soft[j][ii];
-						double y0 = x * b0;
-						double y1 = x * b1;
-							
-						bf0[j] = y1;
-						bf1[j] = y0;
-						soft_out[j][ii] = y1 * b0;
-					}
 
-					a = 0;
+				posh[row0] += 1;
+				posh[row1] += 1;
 
-					for( j = 0; j < q; j++ )
-						a += soft_out[j][ii];
-#ifdef MAKE_DUMP
-					for( j = 0; j < q; j++ )
-						fprintf(fdump, "%8.6f ", soft_out[j][ii] );
-					fprintf(fdump, "\n");
-#endif
-					a = 1.0 / a;
-					for( j = 0; j < q; j++ )
-						soft_out[j][ii] *= a;
-
-					c = b = 0;
-
-					for( j = 0; j < q; j++ )
-					{
-						b += bf0[j];
-						c += bf1[j];
-					}
-#ifdef MAKE_DUMP
-					fprintf(fdump, "soft_in\n");
-					for( j = 0; j < q; j++ )
-						fprintf(fdump, "%8.6f ", bf0[j] );
-					fprintf(fdump, "\n");
-
-					fprintf(fdump, "soft_in\n");
-					for( j = 0; j < q; j++ )
-						fprintf(fdump, "%8.6f ", bf1[j] );
-					fprintf(fdump, "\n");
-#endif
-					b = 1.0 / b;
-					c = 1.0 / c;
-					for( j = 0; j < q; j++ )
-					{
-						bf0[j] *= b;
-						bf1[j] *= c;
-					}
-
-					for( j = 0; j < q; j++ )
-					{
-						soft_in[j][index0 + kkk0] = bf0[j];
-						soft_in[j][index1 + kkk1] = bf1[j];
-					}
-				}
-
-				kkk0++;
-				kkk1++;
-
-				dcmp++;
 			}
-
-			posh[row0] += 1;
-			posh[row1] += 1;
-
 		}
+		else
+		{
+			for( i = 0; i < nh; i++ )
+			{
+				int cw = col_weight[i];		
+				int kk;
+				short *ci = hb_ci[i];
 
+				int pos_n = i * m;
+
+				switch( cw )
+				{
+
+				case 2:
+					for( k = 0; k < m; k++ )
+					{
+						int ii = pos_n + k;
+						double sum;
+
+						if( use_p_thr & smask[ii] )
+						{
+							for( j = 0; j < q; j++ )	
+								soft_out[j][ii] = soft[j][ii];
+						}
+						else
+						{
+							int idx0 = (((m - hb[ci[0]][i]) % m) + k) % m;
+							int idx1 = (((m - hb[ci[1]][i]) % m) + k) % m;
+							int d0 = posh[ci[0]]*r + ci[0]*m + idx0;
+							int d1 = posh[ci[1]]*r + ci[1]*m + idx1;
+
+							sum = 0;
+#ifndef SOFT_IN_OUTS
+							for( j = 0; j < q; j++ )
+								sum += (soft_out[j][ii] = soft[j][ii] * soft_outs[j][d0] * soft_outs[j][d1]);
+#else
+							for( j = 0; j < q; j++ )
+								sum += (soft_out[j][ii] = soft[j][ii] * soft_in[j][d0]   * soft_in[j][d1]);
+#endif
+
+							sum = 1.0 / sum;
+							for( j = 0; j < q; j++ )
+								soft_out[j][ii] *= sum;
+
+
+#ifndef SOFT_IN_OUTS
+							sum = 0;
+							for( j = 0; j < q; j++ )
+								sum += (soft_in[j][d0] = soft[j][ii] * soft_outs[j][d1]);
+
+							sum = 1.0 / sum;
+							for( j = 0; j < q; j++ )
+								soft_in[j][d0] *= sum;
+
+							sum = 0;
+							for( j = 0; j < q; j++ )
+								sum += (soft_in[j][d1] = soft[j][ii] * soft_outs[j][d0]);
+
+							sum = 1.0 / sum;
+							for( j = 0; j < q; j++ )
+								soft_in[j][d1] *= sum;
+#else
+							{
+								static double buf0[1024*4];
+								static double buf1[1024*4];
+								double sum0 = 0;
+								double sum1 = 0;
+
+								for( j = 0; j < q; j++ )
+									sum0 += (buf0[j] = soft[j][ii] * soft_in[j][d1]);
+
+								for( j = 0; j < q; j++ )
+									sum1 += (buf1[j] = soft[j][ii] * soft_in[j][d0]);
+
+								sum0 = 1.0 / sum0;
+								for( j = 0; j < q; j++ )
+									soft_in[j][d0] = buf0[j] * sum0;
+
+								sum1 = 1.0 / sum1;
+								for( j = 0; j < q; j++ )
+									soft_in[j][d1] = buf1[j] * sum1;
+							}
+#endif
+						}
+					}
+					break;
+
+				default:
+					for( k = 0; k < m; k++ )
+					{
+						int ii = pos_n + k;
+						double a;
+						double sum;
+
+						if( use_p_thr & smask[ii] )
+						{
+							for( j = 0; j < q; j++ )	
+								soft_out[j][ii] = soft[j][ii];
+						}
+						else
+						{
+							sum = 0;
+							for( j = 0; j < q; j++ )
+							{
+								a = soft[j][ii];
+								for( kk = 0; kk < cw; kk++ )
+								{
+									int idx = (((m - hb[ci[kk]][i]) % m) + k) % m;
+									int d = posh[ci[kk]]*r + ci[kk]*m + idx;		
+	#ifndef SOFT_IN_OUTS
+									a *= soft_outs[j][d];
+	#else
+									a *= soft_in[j][d];
+	#endif
+								}
+								soft_out[j][ii] = a;
+								sum += a;
+							}
+
+							sum = 1.0 / sum;
+							for( j = 0; j < q; j++ )
+								soft_out[j][ii] *= sum;
+
+
+							for( kk = 0; kk < cw; kk++ )
+							{
+								int idx = (((m - hb[ci[kk]][i]) % m) + k) % m; 
+								int d = posh[ci[kk]]*r + ci[kk]*m + idx;
+								double sum = 0;
+
+	#ifndef SOFT_IN_OUTS
+								for( j = 0; j < q; j++ )
+								{
+									soft_in[j][d] = soft_out[j][ii] / soft_outs[j][d];
+									sum += soft_in[j][d];
+								}
+
+								sum = 1.0 / sum;
+								for( j = 0; j < q; j++ )
+									soft_in[j][d] *= sum;
+
+	#else
+								static double buf[1024*4];
+								for( j = 0; j < q; j++ )
+								{
+									buf[j] = soft_out[j][ii] / soft_in[j][d];
+									sum += buf[j];
+								}
+
+								sum = 1.0 / sum;
+								for( j = 0; j < q; j++ )
+									soft_in[j][d] = buf[j] * sum;
+	#endif
+
+							}
+						}
+					}
+				}
+				dcmp++;
+
+				for( kk = 0; kk < cw; kk++ )
+					posh[hb_ci[i][kk]] += 1;
+
+			}
+		}
 #else   //COLUMN_BY_COLUMN
 		for( i = 0; i < nh; i++ )
 		{
@@ -7972,7 +8152,7 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
 			p_thr = nInp == 2 ? 0.0 : (double)mxGetPr(pInp[2])[0];
 		   	
 			// mexPrintf("nOut: %d\n", nOut);
-            // mexPrintf("maxiter: %d, q: %d, state_q: %d, n: %d, thr: %f\n", maxiter, q, state->q, ng, p_thr);
+            //mexPrintf("maxiter: %d, q: %d, state_q: %d, n: %d, thr: %f\n", maxiter, q, state->q, ng, p_thr);
             
 
            if( state->q == q )
@@ -8098,7 +8278,7 @@ void mexFunction(int nOut, mxArray *pOut[], int nInp, const mxArray *pInp[])
               decod_init( state );
               pOut[0]=mxCreateDoubleMatrix(1,1,mxREAL); 
               *(mxGetPr(pOut[0])) = 1;
- //             mexPrintf("decoder open: OK\n");
+              mexPrintf("decoder open: OK\n");
               return;
 
 	     default:

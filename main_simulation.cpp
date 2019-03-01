@@ -205,6 +205,7 @@ int main_simulation(int argc, char *argv[]) {
     int num_frame_errors;       // former Nerr
 
 	int decoder_type;
+	int q_mod;
 
 	int modulation_type;     	// Modulation type:  0 - skip, 1 - QAM4, 2 - QAM16, 3 - QAM64, 4 - QAM256
 	int permutation_type;		// Permutation type:
@@ -289,6 +290,8 @@ int main_simulation(int argc, char *argv[]) {
         vector< int > column_weights;
         matrix<int> org_HM;
         matrix<int> current_HM;
+		matrix<int> org_HC;
+		matrix<int> current_HC;
 
         int max_code_idx = (unsigned)input_codes.size();
     
@@ -316,7 +319,12 @@ int main_simulation(int argc, char *argv[]) {
 
 			best_snr_idx = s_max;
 
+			input_codes[code_idx].select("_q_mod").cast_to(q_mod);
 			input_codes[code_idx].select("_decoder_type").cast_to(decoder_type);
+
+			if( q_mod > 2 )
+				decoder_type = 6;	// !!!!!!!! q-decoder
+
 			input_codes[code_idx].select("_lifting").cast_to(tailbite_length);
 			input_codes[code_idx].select("_punctured_blocks").cast_to(punctured_blocks);
 			input_codes[code_idx].select("_iterations").cast_to(num_iterations);
@@ -324,6 +332,10 @@ int main_simulation(int argc, char *argv[]) {
 	        
 			
 			input_codes[code_idx].select("code").cast_to(org_HM);
+
+			if( q_mod > 2 )
+				input_codes[code_idx].select("coef").cast_to(org_HC);
+
 
             input_codes[code_idx].select("column_weights").cast_to(column_weights);
             input_codes[code_idx].select("config_index").cast_to(config_index);
@@ -377,10 +389,33 @@ int main_simulation(int argc, char *argv[]) {
 					}
 				}
 			}
+
+			if( q_mod > 2 )
+			{
+				// NOTE: coefs must be presented in NATURAL form
+				for( int i = 0; i < rows; i++ ) 
+				{
+					for( int j = 0; j < columns; j++ ) 
+					{
+						if( org_HC(i, j) > 0 ) 
+						{
+							int t = org_HC(i, j);
+							t = ((t - 1) % (q_mod-1)) + 1;
+							if( j == rows - 1 ) 
+							{ // special last column int bidiagonal part of matrix
+//								t = t == 0 ? 1 : t;  // ??????????????????????
+							}
+							org_HC(i, j) = t;
+						}
+					}
+				}
+			}
 #endif
 
             current_HM = org_HM;
 
+			if( q_mod > 2 )
+				current_HC = org_HC;
 
 			// Counting row weights - to get compability with ggp
 			vector< int > row_weights;
@@ -427,11 +462,16 @@ int main_simulation(int argc, char *argv[]) {
 
 					reset_random(); // all codes are tested with same noise
 
-					curr_girth = trace_matrix( current_HM, tailbite_length, GTARGET, ACE, girth_spectrum ); 
-					show_matrix_property( ACE, girth_spectrum, curr_girth, GTARGET );
+					if( q_mod <= 2 )
+					{
+						curr_girth = trace_matrix( current_HM, tailbite_length, GTARGET, ACE, girth_spectrum ); 
+						show_matrix_property( ACE, girth_spectrum, curr_girth, GTARGET );
+					}
 
 	                result = bp_simulation(
+ 						    q_mod,
                             current_HM,
+							current_HC,
                             tailbite_length,
                             num_iterations,
                             num_frame_errors,

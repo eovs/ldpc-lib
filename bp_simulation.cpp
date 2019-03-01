@@ -3,6 +3,7 @@
 #include <cmath>
 #include <exception>
 #include <vector>
+//#include <math.h>
 
 #include "bp_simulation.h"
 #include "commons_portable.h"
@@ -278,8 +279,33 @@ int bp_decod_lm(
 }
 #endif
 
+int binlog( int x )
+{
+	int res = 0;
+
+	if( x < 2 )	return res;
+	
+	while( x )
+	{
+		res++;
+		x >>= 1;
+	}
+
+	return res-1;
+}
+
+void word2bin( int x, double *y, int q_bits )
+{
+	int i;
+	int mask = 1 << (q_bits-1);
+	for( i = 0; i < q_bits; i++, mask >>= 1 )
+		y[i] = (x & mask) != 0;
+}
+
 pair<double, double> bp_simulation(
+    int q_mod,	
     matrix< int > const &code_generating_matrix,
+	matrix< int > const &coef_matrix,
     int tailbite_length,
     int max_iterations,
     int n_frame_errors,
@@ -299,6 +325,7 @@ pair<double, double> bp_simulation(
     int r = b * tailbite_length;
     int n = c * tailbite_length;
 	int M = tailbite_length;
+	int q_bits;
     int i, j;
 
 	    // 2. Channel model.
@@ -309,21 +336,37 @@ pair<double, double> bp_simulation(
 	int extra_bits = 0;		// if n%(2*halfmlog) != 0
 	int n_ext = n;			//
 	double T = 26.0;	//?????????????????????????????????????????????
+//	double p_thr = exp( (double)-9 );
+	double p_thr = 0;
 
     static DEC_STATE *dec_state =  NULL;
 	static PERMSTATE* perm_state = NULL;
 
+	q_bits = binlog( q_mod );
+
 	if( dec_state )
 		decod_close( dec_state );
 	
-	dec_state = decod_open( decoder_type, 1, b, c, tailbite_length );
+	dec_state = decod_open( decoder_type, q_bits, b, c, tailbite_length );
 	if( !dec_state )
 		die("Can't open decode");
 
-	for( i = 0; i < b; i++ )
-        for( j = 0; j < c; j++ )
-            dec_state->hd[i][j] = code_generating_matrix(i, j);
+	if( q_mod == 2 )
+	{
+		for( i = 0; i < b; i++ )
+		   for( j = 0; j < c; j++ )
+			    dec_state->hd[i][j] = code_generating_matrix(i, j);
+	}
+	else
+	{
+		for( i = 0; i < b; i++ )
+			for( j = 0; j < c; j++ )
+				dec_state->hb[i][j] = code_generating_matrix(i, j);
 
+		for( i = 0; i < b; i++ )
+			for( j = 0; j < c; j++ )
+				dec_state->hc[i][j] = coef_matrix(i, j);
+	}
 	decod_init( dec_state );
 
 
@@ -341,11 +384,19 @@ pair<double, double> bp_simulation(
 
 	if( perm_state )
 		Permutations_Close( perm_state );
-	perm_state = Permutations_Open( b, c, M, QAM, halfmlog, permutation_type, permutation_block, permutation_inter );
+
+	if( q_mod == 2 )
+		perm_state = Permutations_Open( b, c, M, QAM, halfmlog, permutation_type, permutation_block, permutation_inter );
+	else
+		perm_state = Permutations_Open( b, c, M*q_bits, QAM, halfmlog, permutation_type, permutation_block, permutation_inter );
+
 	if( !perm_state )
 		die("Can't open permutations");
 	
-	Permutation_Init( perm_state, dec_state->hd );
+	if( q_mod == 2 )
+		Permutation_Init( perm_state, dec_state->hd );
+	else
+		Permutation_Init( perm_state, dec_state->hb );
 
 	int moddim = 2 * halfmlog;
 
@@ -380,6 +431,7 @@ pair<double, double> bp_simulation(
     case MS_DEC:    out_type = 0;		break;
     case IMS_DEC:   out_type = 0;		break;
     case IASP_DEC:  out_type = 1;		break;
+	case FHT_DEC:   out_type = 0;       break;     // ?????????????????????????
 	case TASP_DEC:  out_type = 1;		break;
 	case LMS_DEC:   out_type = 0;		break;
 	case LCHE_DEC:  out_type = 1;		break;
@@ -427,19 +479,32 @@ pair<double, double> bp_simulation(
     // 3. Generating random codeword.
     vector< bit > codeword;
 	bool zero_codeword = false;
-    int codeword_exitcode = random_codeword(code_generating_matrix, tailbite_length, codeword);
-    if (codeword_exitcode < 0) {
-        // MB: shouldn't we die there?
-        printf("Bad matrix: zero codeword will be used\n");
-        //return make_pair(-10.0, -10.0);
-		zero_codeword = true;
-    } else if (codeword_exitcode > 0) {
-        // MB: shouldn't we die there?
-        printf("Bad encoding: zero codeword will be used\n");
-        //return make_pair(10.0, 10.0);
-		zero_codeword = true;
-    }
 
+	if( q_mod == 2 )
+	{
+		int codeword_exitcode = random_codeword(code_generating_matrix, tailbite_length, codeword);
+
+		if (codeword_exitcode < 0) 
+		{
+			// MB: shouldn't we die there?
+			printf("Bad matrix: zero codeword will be used\n");
+			//return make_pair(-10.0, -10.0);
+			zero_codeword = true;
+		} 
+		else if (codeword_exitcode > 0) 
+		{
+			// MB: shouldn't we die there?
+			printf("Bad encoding: zero codeword will be used\n");
+			//return make_pair(10.0, 10.0);
+			zero_codeword = true;
+		}
+    }
+	else
+	{
+		// q-encoder
+		zero_codeword = true;
+	}
+	
 	if( zero_codeword )
 	{
 		for( i = 0; i < n; i++ )
@@ -447,80 +512,145 @@ pair<double, double> bp_simulation(
 	}
 
 
-	//EUG
-	for( i = 0; i < n; i++ ) codeword[i] = 0;
-
     // 4. Simulation
-	for( i = 0; i < n; i++ )
-		perm_state->buffer[i] = codeword[i];
+	int nse = 0, nue = 0, nde = 0;
+	int experiment = 0;
+
+	if( q_mod == 2 )
+	{
+		//EUG
+		for( i = 0; i < n; i++ ) codeword[i] = 0;    // ?????????????????????????
+
+		for( i = 0; i < n; i++ )
+			perm_state->buffer[i] = codeword[i];
 	
-	Permutation(perm_state, 0, perm_state->buffer, perm_state->perm_codeword );		//direct permutation
+		Permutation(perm_state, 0, perm_state->buffer, perm_state->perm_codeword );		//direct permutation
 
-	memset( perm_state->perm_codeword+n, 0, extra_bits * sizeof( perm_state->perm_codeword[0] ) );
+		memset( perm_state->perm_codeword+n, 0, extra_bits * sizeof( perm_state->perm_codeword[0] ) );
 
+		QAM_modulator( qam_mod_st, perm_state->perm_codeword, qam_mod_st->dx  );
+	}
+	else
+	{
+		for( i = 0; i < n; i++ )
+			word2bin( codeword[i], &perm_state->buffer[i*q_bits], q_bits );
 
-    int nse = 0, nue = 0, nde = 0;
-    int experiment = 0;
-	
-	
+		Permutation(perm_state, 0, perm_state->buffer, perm_state->perm_codeword );		//direct permutation
 
-	QAM_modulator( qam_mod_st, perm_state->perm_codeword, qam_mod_st->dx  );
+		memset( perm_state->perm_codeword+n, 0, extra_bits * sizeof( perm_state->perm_codeword[0] ) );
+	}
 
     try {
         console_exception_hook x_hook('x', "interrupts current code simulation", interruption_exception());
-        while (nde < n_frame_errors && experiment <= n_experiments) {
+        while (nde < n_frame_errors && experiment <= n_experiments) 
+		{
             console_check_hooks();
             ++experiment;
 
-			switch( modulation_type )
+			if( q_mod == 2 )
 			{
-			case MODULATION_SKIP:
-				for ( i = 0; i < n; ++i) {
-					double noise = next_random_gaussian();
-					perm_state->buffer[i] = -2.0 * (sigma * noise + 2.0 * perm_state->perm_codeword[i] - 1.0) / (sigma * sigma);
-				}
-				break;
-
-			case MODULATION_QAM4:
-				for ( i = 0; i < n; ++i) {
-					double noise = next_random_gaussian();
-					perm_state->buffer[i] = -2.0 * (sigmaQAM * noise + 2.0 * perm_state->perm_codeword[i] - 1.0) / (sigmaQAM * sigmaQAM);
-				}
-				break;
-
-			case MODULATION_QAM16:
-				//break;
-
-			case MODULATION_QAM64:
-				//break;
-
-			case MODULATION_QAM256:
-				for( i = 0; i < 2*nQAMSignals; i++ )
+				switch( modulation_type )
 				{
-					double noise = next_random_gaussian();
-					qam_mod_st->dx[i] += noise; 
-				}
-				Demodulate( qam_demod_st, qam_mod_st->dx, perm_state->buffer );
-				for( i = 0; i < n; i++ )
-					perm_state->buffer[i] = -perm_state->buffer[i] ;
+				case MODULATION_SKIP:
+					for ( i = 0; i < n; ++i) {
+						double noise = next_random_gaussian();
+						perm_state->buffer[i] = -2.0 * (sigma * noise + 2.0 * perm_state->perm_codeword[i] - 1.0) / (sigma * sigma);
+					}
+					break;
 
-				break;
+				case MODULATION_QAM4:
+					for ( i = 0; i < n; ++i) {
+						double noise = next_random_gaussian();
+						perm_state->buffer[i] = -2.0 * (sigmaQAM * noise + 2.0 * perm_state->perm_codeword[i] - 1.0) / (sigmaQAM * sigmaQAM);
+					}
+					break;
+
+				case MODULATION_QAM16:
+					//break;
+
+				case MODULATION_QAM64:
+					//break;
+
+				case MODULATION_QAM256:
+					for( i = 0; i < 2*nQAMSignals; i++ )
+					{
+						double noise = next_random_gaussian();
+						qam_mod_st->dx[i] += noise; 
+					}
+					Demodulate( qam_demod_st, qam_mod_st->dx, perm_state->buffer );
+					for( i = 0; i < n; i++ )
+						perm_state->buffer[i] = -perm_state->buffer[i] ;
+
+					break;
+				}
+			}
+			else
+			{
+				switch( modulation_type )
+				{
+				case MODULATION_SKIP:
+					for( i = 0; i < n*q_bits; i++ ) 
+					{
+						double noise = next_random_gaussian();
+						perm_state->buffer[i] = sigma * noise + 2.0 * perm_state->perm_codeword[i] - 1.0;
+					}
+
+					for( i = 0; i < n; i++ )
+					{
+						double sum;
+						static double LH[1024];
+						double *x = &perm_state->buffer[i*q_bits];
+						
+						for( j = 0; j < q_mod; j++ )
+						{
+							int k;
+							double V[10];
+							double lh;
+
+							word2bin( j, V, q_bits );
+							for( k = 0; k < q_bits; k++ )
+								V[k] = V[k] * 2 - 1;
+
+							lh = 0;
+							for( k = 0; k < q_bits; k++ )
+								lh += V[k] * x[k];
+
+							LH[j] = lh / (sigma * sigma);
+						}
+
+						sum = 0.0;
+						for( j = 0; j < q_mod; j++ )
+						{
+							dec_state->qy[j][i] = std::exp( LH[j] );
+							sum += dec_state->qy[j][i];
+						}
+
+						for( j = 0; j < q_mod; j++ )
+							dec_state->qy[j][i] /= sum;
+					}
+					break;
+				}
 			}
 
 			//memcpy( perm_state->buffer, dec_state->y, n*sizeof(dec_state->y[0]));
 
-			Permutation(perm_state, 1, perm_state->buffer, dec_state->y );		// Inverse permutation
+			if( q_mod == 2 )
+				Permutation(perm_state, 1, perm_state->buffer, dec_state->y );		// Inverse permutation
+//			else
+//				Permutation(perm_state, 1, perm_state->buffer, dec_state->y );		// Inverse permutation
 
 #if 0
-            int iter = bp_decod_lm( received, C, V, VI, col_weights, row_weights, max_iterations );
-            int curr_nse = 0;
-            for (int i = 0; i < n; ++i) {
-                curr_nse += (received[i] < 0) != codeword[i];
-            }
+	            int iter = bp_decod_lm( received, C, V, VI, col_weights, row_weights, max_iterations );
+		        int curr_nse = 0;
+			    for (int i = 0; i < n; ++i) {
+				    curr_nse += (received[i] < 0) != codeword[i];
+            }	
 #else
             int iter, curr_nse = 0, curr_nse_info = 0;
 
+			if( q_mod == 2 )
 			{
+				// imitate puncturing
 				double init_val = qam_demod_st->DemodOutType == 1 ? 0 : 0.5;
 
 				int plen = dec_state->m * punctured_blocks;
@@ -532,16 +662,11 @@ pair<double, double> bp_simulation(
 				for( i = pstart; i < pstop; i++ )
 					dec_state->y[i] = init_val;
 			}
-/*
-			for( i = 0; i < n; i++ )
+			else
 			{
-				dec_state->y[i] /= 10;
-				if( dec_state->y[i] <= 0 )
-					i = i;
+				// ??????????????????????
 			}
 
-			dec_state->y[] = -0.1;
-*/
             switch( decoder_type )
             {
             case BP_DEC:    iter = bp_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);				 break;
@@ -550,6 +675,7 @@ pair<double, double> bp_simulation(
             case MS_DEC:    iter = min_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA); break;
             case IMS_DEC:   iter = imin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_THR, MS_QBITS, MS_DBITS); break;
             case IASP_DEC:  iter = isum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
+			case FHT_DEC:   iter = sum_prod_gfq_decod_lm( dec_state, dec_state->qy, dec_state->qhard, dec_state->qdecword, max_iterations, p_thr );	 break;
 			case TASP_DEC:  iter = tdmp_sum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
 			case LMS_DEC:   iter = lmin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_BETA); break;
 			case LCHE_DEC:  iter = lche_decod( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
@@ -558,14 +684,30 @@ pair<double, double> bp_simulation(
 
             if( DEC_DECISION == 0 )
             {
-                for (i = 0; i < n; i++) {
-                    if (dec_state->decword[i] != (short)codeword[i]) {
-                        ++curr_nse;
-                        if (i >= r) {
-                            ++curr_nse_info;
-                        }
-                    }
-                }
+				if( q_mod == 2 )
+				{
+					for (i = 0; i < n; i++) {
+						if (dec_state->decword[i] != (short)codeword[i]) {
+							++curr_nse;
+							if (i >= r) {
+								++curr_nse_info;
+							}
+						}
+					}
+				}
+				else
+				{
+					for( i = 0; i < n; i++ ) 
+					{
+						if( dec_state->qhard[i] != (short)codeword[i]) 
+						{
+							curr_nse++;
+							if( i >= r )
+								curr_nse_info++;
+						}
+					}
+				}
+
 				if( curr_nse && iter < max_iterations )
 					i = 0;
             }
@@ -614,12 +756,12 @@ pair<double, double> bp_simulation(
             }
 
 #endif
-            if (curr_nse > 0) {
+            if( curr_nse > 0 ) 
+			{
                 nse += curr_nse_info;
                 ++nde;
-                if (iter >= 0) {
+                if (iter >= 0) 
                     ++nue;
-                }
 
 				if( show_process )
 				{

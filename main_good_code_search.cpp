@@ -284,6 +284,7 @@ int main_good_code_search(int argc, char *argv[]) {
                         printf("\nCurrent matrix: #%d\nCurrent code: #%d\n---------------------\n", matrix_index, code_to_test);
 
                         matrix< int > result;
+						matrix< int > coef;
                         int min_module = 0;
 
                         // 6.1. Testing various target girths to find the one which works.
@@ -317,7 +318,9 @@ int main_good_code_search(int argc, char *argv[]) {
                         for (int s = 0, s_max = (int) snrs.size(); s < s_max; ++s) {
                             printf("Modeling started for SNR = %lf\n", snrs[s]);
                             pair<double, double> bp_result = bp_simulation(
+								    2,   // q_mod = 2;
                                     result,
+									coef,
                                     tailbite_length,
                                     num_iterations,
                                     num_frame_errors,

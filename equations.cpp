@@ -205,6 +205,8 @@ voltage_check_result equation_builder::check_voltages_and_coefs
 	 voltage_check_result rv;
 	 // 1. Filling up the nodes.
 	 vector< int > values(tree.size());
+	 vector< int > coef_values(tree.size());
+
 	 for (int i = 1, i_max = (int) tree.size(); i < i_max; ++i) 
 	 {
 		 result_tree_node const &curr = tree[i];
@@ -212,15 +214,18 @@ voltage_check_result equation_builder::check_voltages_and_coefs
 		 {
 			 // a root in one of the trees
 			 values[i] = 0;
+			 coef_values[i] = 0;
 		 } 
 		 else 
 			 if (curr.negative) 
 			 {
 				values[i] = values[curr.parent] - voltages[curr.edge_id];
+				coef_values[i] = coef_values[curr.parent] - coef[curr.edge_id];
 			 } 
 			 else 
 			 {
-				values[i] = values[curr.parent] + voltages[curr.edge_id];
+			    values[i] = values[curr.parent] + voltages[curr.edge_id];
+				coef_values[i] = coef_values[curr.parent] + coef[curr.edge_id];
 			 }
 	 }
 
@@ -232,7 +237,10 @@ voltage_check_result equation_builder::check_voltages_and_coefs
 		 if (sum == 0) 
 		 {
 			 // An identity zero found.
-			 rv.first_failed_equation = num_failed;
+			 int coef_sum = coef_values[equations[i].first] - coef_values[equations[i].second];
+
+			 if( coef_sum == 0 )
+				rv.first_failed_equation = num_failed;
 			 return rv;
 		 }
 	 }

@@ -2,7 +2,7 @@
 #define _DECODERS_H_
 
 
-//#define ORIG_TABLES
+#define ORIG_TABLES
 
 #define DEC_DECISION 0	// 0 - hard decision, 1 - soft decision
 
@@ -240,7 +240,7 @@ typedef struct
 	short **fht_hb_ci;
 	short **fht_hb_ri;
 	short **fht_hc_rl;
-	short **fht_hb_cj;
+//	short **fht_hb_cj;
 	short **fht_t;
 	short **fht_ti;
 	int *fht_list;
@@ -252,6 +252,7 @@ typedef struct
 	double **fht_soft_in;
 	double **fht_soft_outs;
 	double **fht_soft_out;
+	short *fht_cw;
 
 	// TDMP Advanced Sum-Prod Decoder
 	double  *tasp_data0;
