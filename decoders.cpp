@@ -643,7 +643,7 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 			return NULL;
 
 //		st->fht_hb_ci = Alloc2d_short(nh*M, 2 );
-		st->fht_hb_ci = Alloc2d_short(nh*M, mh );
+		st->fht_hb_ci = Alloc2d_short(nh, mh );
 		if( st->fht_hb_ci==NULL)
 			return NULL;
 
@@ -665,6 +665,9 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 			return NULL;
 
 		st->fht_cw = (short*)calloc(st->nh, sizeof(st->fht_cw[0]) );
+
+		st->fht_coef_mode = 0;
+
 		break;
 
 	case TASP_DEC:
@@ -1116,6 +1119,15 @@ int decod_init( void *state )
 		gf2alog = (short*)calloc( st->q, sizeof(short) );
 
 		prepare_mul_tab( st->hb, st->hc, st->rh, st->nh, st->fht_list, st->fht_hc_rl, st->q_bits, gf2log, gf2alog, st->fht_t, st->fht_ti, st->fht_ilist, st->fht_ilist_size );
+
+		if( st->fht_coef_mode )
+		{
+			// transform power representation to natural representation
+			int i, j;
+			for( i = 0; i < st->rh; i++ )
+				for( j = 0; j < st->nh; j++ )
+					st->hc[i][j] = gf2alog[st->hc[i][j]];
+		}
 
 		free( gf2log );
 		free( gf2alog );

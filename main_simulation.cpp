@@ -397,15 +397,14 @@ int main_simulation(int argc, char *argv[]) {
 				{
 					for( int j = 0; j < columns; j++ ) 
 					{
-						if( org_HC(i, j) > 0 ) 
+						if( org_HM(i, j) > -1 )			// exactly org_HM !!!
 						{
-							int t = org_HC(i, j);
-							t = ((t - 1) % (q_mod-1)) + 1;
-							if( j == rows - 1 ) 
-							{ // special last column int bidiagonal part of matrix
-//								t = t == 0 ? 1 : t;  // ??????????????????????
+							if( org_HC(i, j) > -1 )
+							{
+								org_HC(i, j) = org_HC(i, j) % (q_mod-1);
+								if( org_HC(i, j) == 0 )
+									org_HC(i, j) = q_mod-1;
 							}
-							org_HC(i, j) = t;
 						}
 					}
 				}
@@ -439,12 +438,18 @@ int main_simulation(int argc, char *argv[]) {
 				}
 			}
 			
+			mark_num  = -1;
 
             do
             {
 				int s;
 				int curr_girth;
+				int coef_mode = 0;  // natural form of coeffs in org_HC (for q-codes)
 
+				if( q_mod > 2 )
+					coef_mode = mark_num == -1 ? 0 : 1;  // 0 - natural, 1 - power
+
+				// cycle over SNR
 				for( s = 0; s < s_max; s++ )
 				{
 					pair<double, double> result;
@@ -472,6 +477,7 @@ int main_simulation(int argc, char *argv[]) {
  						    q_mod,
                             current_HM,
 							current_HC,
+							coef_mode, 
                             tailbite_length,
                             num_iterations,
                             num_frame_errors,
@@ -575,6 +581,11 @@ int main_simulation(int argc, char *argv[]) {
 					descriptor.open("matrix_index").set(matrix_index);
 					descriptor.open("code_index").set(code_index);
 					descriptor.open("simulation_logs").set(snr_results);
+					if( q_mod > 2 )
+						descriptor.open("_q_mod").set(q_mod);
+					if( q_mod > 2 )
+						descriptor.open("coef").set(current_HC);
+
 					//						descriptor.open("time").set(time_sec);
 					descriptor.to_file(argv[2], true);
 				}

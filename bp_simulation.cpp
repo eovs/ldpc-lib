@@ -306,6 +306,7 @@ pair<double, double> bp_simulation(
     int q_mod,	
     matrix< int > const &code_generating_matrix,
 	matrix< int > const &coef_matrix,
+	int coef_mode,
     int tailbite_length,
     int max_iterations,
     int n_frame_errors,
@@ -366,6 +367,7 @@ pair<double, double> bp_simulation(
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
 				dec_state->hc[i][j] = coef_matrix(i, j);
+		dec_state->fht_coef_mode = coef_mode;
 	}
 	decod_init( dec_state );
 

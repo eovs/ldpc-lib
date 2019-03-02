@@ -318,9 +318,10 @@ int main_good_code_search(int argc, char *argv[]) {
                         for (int s = 0, s_max = (int) snrs.size(); s < s_max; ++s) {
                             printf("Modeling started for SNR = %lf\n", snrs[s]);
                             pair<double, double> bp_result = bp_simulation(
-								    2,   // q_mod = 2;
+								    2,   // q_mod = 2; !!!
                                     result,
 									coef,
+									0,  // coef_mode = 0, unused for q_mod = 2 !!!
                                     tailbite_length,
                                     num_iterations,
                                     num_frame_errors,
