@@ -321,7 +321,7 @@ int main_good_code_search(int argc, char *argv[]) {
 								    2,   // q_mod = 2; !!!
                                     result,
 									coef,
-									0,  // coef_mode = 0, unused for q_mod = 2 !!!
+									0,  // unused for q_mod = 2 !!!
                                     tailbite_length,
                                     num_iterations,
                                     num_frame_errors,

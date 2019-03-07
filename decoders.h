@@ -253,7 +253,9 @@ typedef struct
 	double **fht_soft_outs;
 	double **fht_soft_out;
 	short *fht_cw;
-	int fht_coef_mode;
+	int fht_ncols2convert;
+	short *fht_gf2log;
+	short *fht_gf2alog;
 
 	// TDMP Advanced Sum-Prod Decoder
 	double  *tasp_data0;

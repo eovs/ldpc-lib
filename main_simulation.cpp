@@ -39,9 +39,10 @@ typedef struct
 	int size;
 	int min_modulo;
 	int *data;
+	int *coef;
 } MARK_PARAM;
 
-MARK_PARAM create_mark_param( int nrow, int ncol )
+MARK_PARAM create_mark_param( int nrow, int ncol, int q_mod )
 {
 	MARK_PARAM mp;
 
@@ -50,15 +51,19 @@ MARK_PARAM create_mark_param( int nrow, int ncol )
 	mp.min_modulo = 0;
 	mp.size = 0;
 	mp.data = (int*) malloc(ncol * nrow * sizeof(mp.data[0]));
+	if( q_mod > 2 )
+		mp.coef = (int*) malloc(ncol * nrow * sizeof(mp.coef[0]));
+
 	return mp;
 }
 
 void delete_mark_param( MARK_PARAM *mp )
 {
 	free(mp->data);
+	free(mp->coef);
 }
 
-int get_mark_param( MARK_PARAM *mp, FILE *fp )
+int get_mark_param( MARK_PARAM *mp, FILE *fp, int q_mod )
 {
 	int c;
 	char line[128];
@@ -73,6 +78,23 @@ int get_mark_param( MARK_PARAM *mp, FILE *fp )
 	if( c == EOF )
 		return -1;
 
+	if( q_mod > 2 )
+	{
+		fscanf( fp, "%120s", line );	// read data
+		fscanf( fp, "%120s", line );	// read =
+		fscanf( fp, "%120s", line );	// read array
+		fscanf( fp, "%120s", line );	// read {
+
+		i = 0;
+		while( fscanf( fp, "%d", &c ) != 0 )
+		{
+			mp->coef[i++] = c;
+		}
+		mp->size = i;
+
+		fscanf( fp, "%120s", line );	// read }
+	}
+
 	fscanf( fp, "%120s", line );	// read data
 	fscanf( fp, "%120s", line );	// read =
 	fscanf( fp, "%120s", line );	// read array
@@ -86,6 +108,7 @@ int get_mark_param( MARK_PARAM *mp, FILE *fp )
 	mp->size = i;
 
 	fscanf( fp, "%120s", line );	// read }
+
 	fscanf( fp, "%120s", line );	// read min_modulo
 	fscanf( fp, "%120s", line );	// read =
 	fscanf( fp, "%d", &mp->min_modulo );	// read data
@@ -362,7 +385,7 @@ int main_simulation(int argc, char *argv[]) {
 			double curr_BER, curr_FER;
 
             FILE *fp = NULL;
-            MARK_PARAM mark_param = create_mark_param(rows, columns);
+            MARK_PARAM mark_param = create_mark_param(rows, columns,q_mod);
 
             best_err = 1.0;
 			mark_flag = !(strcmp(mark_file, DEFAULT_MARKING) == 0);
@@ -401,7 +424,7 @@ int main_simulation(int argc, char *argv[]) {
 						{
 							if( org_HC(i, j) > -1 )
 							{
-								org_HC(i, j) = org_HC(i, j) % (q_mod-1);
+								org_HC(i, j) = org_HC(i, j) % q_mod;   // NATURAL form!!!
 								if( org_HC(i, j) == 0 )
 									org_HC(i, j) = q_mod-1;
 							}
@@ -443,12 +466,13 @@ int main_simulation(int argc, char *argv[]) {
             do
             {
 				int s;
-				int curr_girth;
-				int coef_mode = 0;  // natural form of coeffs in org_HC (for q-codes)
-
+				int curr_girth = 0;
+				int ncols2convert = 0;  // number of power-form columns of coeffs in HC (for q-codes)
 				if( q_mod > 2 )
-					coef_mode = mark_num == -1 ? 0 : 1;  // 0 - natural, 1 - power
-
+				{
+					int ncols = current_HM.n_cols();
+					ncols2convert = mark_num == -1 ? 0 : ncols;  // 0 - all natural, other - power
+				}
 				// cycle over SNR
 				for( s = 0; s < s_max; s++ )
 				{
@@ -477,7 +501,7 @@ int main_simulation(int argc, char *argv[]) {
  						    q_mod,
                             current_HM,
 							current_HC,
-							coef_mode, 
+							ncols2convert, 
                             tailbite_length,
                             num_iterations,
                             num_frame_errors,
@@ -583,10 +607,12 @@ int main_simulation(int argc, char *argv[]) {
 					descriptor.open("simulation_logs").set(snr_results);
 					if( q_mod > 2 )
 						descriptor.open("_q_mod").set(q_mod);
-					if( q_mod > 2 )
-						descriptor.open("coef").set(current_HC);
 
-					//						descriptor.open("time").set(time_sec);
+					if( q_mod > 2 )
+					{
+						descriptor.open("coef").set(current_HC);
+					}
+					//descriptor.open("time").set(time_sec);
 					descriptor.to_file(argv[2], true);
 				}
 
@@ -609,7 +635,7 @@ int main_simulation(int argc, char *argv[]) {
                 mark_num++;
                 if (mark_flag)
                 {
-                    int res = get_mark_param(&mark_param, fp);
+                    int res = get_mark_param(&mark_param, fp, q_mod);
                     if (res < 0)
                         mark_flag = 0;
                     else
@@ -622,6 +648,18 @@ int main_simulation(int argc, char *argv[]) {
                                     current_HM(j, i) = mark_param.data[k++];
                             }
                         }
+
+						if( q_mod > 2 )
+						{
+							for (int i = 0, k = 0; i < mark_param.ncol && k < mark_param.size; i++)
+							{
+								for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
+								{
+									if (current_HM(j, i) != -1)    // exactly HM !!!
+										current_HC(j, i) = mark_param.coef[k++];
+								}
+							}
+						}
                     }
                 }
             }

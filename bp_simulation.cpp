@@ -305,8 +305,8 @@ void word2bin( int x, double *y, int q_bits )
 pair<double, double> bp_simulation(
     int q_mod,	
     matrix< int > const &code_generating_matrix,
-	matrix< int > const &coef_matrix,
-	int coef_mode,
+	matrix< int > &coef_matrix,
+	int ncols2convert,
     int tailbite_length,
     int max_iterations,
     int n_frame_errors,
@@ -367,10 +367,24 @@ pair<double, double> bp_simulation(
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
 				dec_state->hc[i][j] = coef_matrix(i, j);
-		dec_state->fht_coef_mode = coef_mode;
+
+
+		for( i = 0; i < b; i++ )
+			for( j = 0; j < c; j++ )
+				if( dec_state->hc[i][j] == q_mod )
+					break;
+
+
+		dec_state->fht_ncols2convert = ncols2convert;
 	}
 	decod_init( dec_state );
 
+	if( q_mod > 2 )
+	{
+		for( i = 0; i < b; i++ )
+			for( j = 0; j < c; j++ )
+				coef_matrix(i, j) = dec_state->hc[i][j];
+	}
 
 	//modulation_type = MODULATION_QAM16;
 

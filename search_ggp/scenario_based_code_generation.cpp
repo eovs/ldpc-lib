@@ -22,6 +22,7 @@ typedef struct
 typedef struct
 {
 	vector< int > a;
+	vector< int > coef;
 	int min_ok_modulo;
 	double fer;
 } MARK_CANDIDATE;
@@ -76,6 +77,7 @@ private: // state moved from run
 		int use_ACE;
 		int use_SPEC;
 		int q_mod;
+		matrix< int > HC_orig;
 		matrix< int > HCM;        // HC modified
 		vector< int > coef_mask;  // the mask for HC matrix 
 		int all_col_2;            // all columns have weight equal to 2
@@ -83,6 +85,7 @@ private: // state moved from run
 
 		matrix< int > HM;
 		matrix< int > HM_orig;
+
 		double snr_for_selection;
 		double min_fer, max_fer;
 		int candidate_cnt;
@@ -136,12 +139,21 @@ private:
 		{
 			for( int i = 0; i < rows-1; i++ )
 				coefs[i*2+1] = coefs[i*2];
+			if( !all_w2 )
+			{
+				int ind = rows-1;
+				coefs[ind*2+2] = coefs[ind*2];
+				if( coefs[ind*2] == coefs[ind*2+1] )
+					coefs[ind*2+1] = (coefs[ind*2+1] + 1) % (q_mod-1);
+			}
 		}
-
-		if( all_w2 )
+		else
 		{
-			if( coefs[rows*2] == coefs[rows*2+1] )
-				coefs[rows*2+1] = (coefs[rows*2+1] + 1) % q_mod;
+			if( all_w2 )
+			{
+				if( coefs[rows*2] == coefs[rows*2+1] )
+					coefs[rows*2+1] = (coefs[rows*2+1] + 1) % (q_mod-1);
+			}
 		}
 	}
 
@@ -400,9 +412,9 @@ public:
 
                     if( q_mod > 2 )
 					{
-						for (int i = prev_elements, i_max = (int) a.size(); i < i_max; ++i) {
+						for (int i = prev_elements, i_max = (int) coef.size(); i < i_max; ++i) {
 							if (coef_mask[i] == 1) {
-								coef[i] = next_random_int(0, q_mod);
+								coef[i] = next_random_int(0, q_mod-1);
 							} else {
 								coef[i] = 0;
 							}
@@ -511,7 +523,7 @@ public:
 								bad_matrix = true;
 							}
 
-							if( !bad_matrix )
+							if( !bad_matrix && q_mod == 2 )
 							{
 								if( use_ACE | use_SPEC )
 								{
@@ -681,6 +693,7 @@ public:
 				if( !snr_est_done )	// i == 0 )
 				{
 					vector< int > a = vmark_record[0].a;
+					vector< int > coef = vmark_record[0].coef;
 					int min_ok_modulo = vmark_record[0].min_ok_modulo;
 					MARK_PARAM mark_param;
 					mark_param.ncol = columns;	//starting_length;
@@ -689,6 +702,8 @@ public:
 
 					matrix<int> current_HM(rows,columns);
 					matrix<int> current_HC(rows,columns);
+
+					int ncols2convert = q_mod > 2 ? starting_length : 0;
 
 					// get part of original matrix
 					for( int i = 0; i < mark_param.nrow; i++ )
@@ -715,7 +730,7 @@ public:
 						{
 							for( int j = 0; j < mark_param.ncol; j++ )
 							{
-								current_HC(i,j) = HM_orig(i,j);  // ?????????????????????????
+								current_HC(i,j) = HC_orig(i,j);  
 							}
 						}
 						// use current mark
@@ -723,7 +738,7 @@ public:
 						{
 							for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
 							{
-								if (current_HC(j, i) != -1)
+								if (current_HM(j, i) != -1)
 									current_HC(j, i) = coef[k++];
 							}
 						}
@@ -739,7 +754,7 @@ public:
 							            q_mod,
 										current_HM,
 										current_HC,
-										0, // ????????????????????????????????????????????????????
+										ncols2convert,
 										tailbite_length,
 										number_of_iterations,	//num_bp_iterations,
 										number_of_err_blocks,	//num_frame_errors,
@@ -765,6 +780,7 @@ public:
 					min_fer  = best_fer;
 					max_fer = min_fer * 1.5;
 					m_cand.a = a;
+					m_cand.coef = coef;
 					m_cand.fer = best_fer;
 					m_cand.min_ok_modulo = min_ok_modulo;
 					vmark_candidate.push_back( m_cand );
@@ -779,6 +795,7 @@ public:
 				{
 					console_exception_hook x_hook('s', interrupt_info_message, local_interruption_exception());			
 					vector< int > a = vmark_record[i].a;
+					vector< int > coef = vmark_record[i].coef;
 					int min_ok_modulo = vmark_record[i].min_ok_modulo;
 
 					MARK_PARAM mark_param;
@@ -788,6 +805,8 @@ public:
 
 					matrix<int> current_HM(rows,columns);
 					matrix<int> current_HC(rows,columns);
+
+					int ncols2convert = q_mod > 2 ? starting_length : 0;
 
 					// get part of original matrix
 					for( int i = 0; i < mark_param.nrow; i++ )
@@ -814,7 +833,7 @@ public:
 						{
 							for( int j = 0; j < mark_param.ncol; j++ )
 							{
-								current_HC(i,j) = HM_orig(i,j);///// ?????????????????????????????
+								current_HC(i,j) = HC_orig(i,j);
 							}
 						}
 						// use current mark
@@ -822,7 +841,7 @@ public:
 						{
 							for (int j = 0; j < mark_param.nrow && k < mark_param.size; j++)
 							{
-								if (current_HC(j, i) != -1)
+								if (current_HM(j, i) != -1)
 									current_HC(j, i) = coef[k++];
 							}
 						}
@@ -833,7 +852,7 @@ public:
 						                q_mod,
 										current_HM,
 										current_HC,
-										0, //?????????????????????????????????????????????????
+										ncols2convert, 
 										tailbite_length,
 										number_of_iterations,		//num_bp_iterations,
 										number_of_err_blocks,		//num_frame_errors,
@@ -864,7 +883,7 @@ public:
 								        q_mod,
 										current_HM,
 										current_HC,
-										0, //??????????????????????????????????????????????????????????
+										ncols2convert, 
 										tailbite_length,
 										number_of_iterations,		//num_bp_iterations,
 										number_of_err_blocks,		//num_frame_errors,
@@ -893,6 +912,7 @@ public:
 						min_fer = bp_result.second;
 						max_fer = min_fer * 1.5;
 						m_cand.a = a;
+						m_cand.coef = coef;
 						m_cand.fer = min_fer;
 						m_cand.min_ok_modulo = min_ok_modulo;
 						//std::cout << "1 - mark_candidate contains " << mark_candidate.size() << " elements.\n";
@@ -921,6 +941,7 @@ public:
 						if( bp_result.second > min_fer && bp_result.second < max_fer )
 						{
 							m_cand.a = a;
+							m_cand.coef = coef;
 							m_cand.fer = bp_result.second;
 							m_cand.min_ok_modulo = min_ok_modulo;
 							//std::cout << "3 - mark_candidate contains " << mark_candidate.size() << " elements.\n";
@@ -972,6 +993,7 @@ public:
 				{
 					result.open("min_modulo").set( vmark_candidate[i].min_ok_modulo);
                     result.open("data").set(vmark_candidate[i].a);
+					result.open("coef").set(vmark_candidate[i].coef);
                     result.to_stream(curr_data);
 				}
 			}
@@ -1071,8 +1093,10 @@ simulation = {
 
 
         double best_metric = 1e9;
-        for (unsigned i = 0, i_max = (unsigned int)input_codes.size(); i < i_max; ++i) {
+        for (unsigned i = 0, i_max = (unsigned int)input_codes.size(); i < i_max; ++i) 
+		{
             matrix<int> current_HM;
+			matrix<int> current_HC;
             vector<settings> logs;
             input_codes[i].select("code").cast_to(current_HM);
             input_codes[i].select("simulation_logs").cast_to(logs);
@@ -1085,17 +1109,41 @@ simulation = {
                     continue;
                 }
             }
+
+            if( q_mod > 2 )
+			{
+				input_codes[i].select("coef").cast_to(current_HC);
+				if( rows != current_HC.n_rows() || columns != current_HC.n_cols() ) 
+				{
+						cout << "Warning: unequal matrices HC in the input!" << endl;
+						continue;
+				}
+
+				for( int i = 0; i < current_HC.n_rows(); i++ )
+				{
+					for( int j = 0; j < current_HC.n_cols(); j++ )
+					{
+						if( current_HM(i, j) > -1 && current_HC(i, j) > -1 )
+							current_HC(i, j) = current_HC(i, j) % (q_mod-1);
+						else
+							current_HC(i, j) = -1;
+					}
+				}
+			}
+
             double maximum_error = 0;
             for (unsigned j = 0, j_max = (unsigned int)logs.size(); j < j_max; ++j) {
                 double current_error;
                 logs[j].select(error_name).cast_to(current_error);
                 maximum_error = std::max(maximum_error, current_error);
             }
-            if (best_metric > maximum_error) {
+            if (best_metric > maximum_error) 
+			{
                 best_metric = maximum_error;
                 HM = current_HM;
 				//================================================
 				HM_orig = HM;
+				HC_orig = current_HC; 
 				//================================================
             }
         }

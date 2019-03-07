@@ -9,8 +9,8 @@
 std::pair<double, double> bp_simulation(
 	int q_mod,
     matrix< int > const &code_generating_matrix,
-	matrix< int > const &coef_matrix,
-	int coef_mode,
+	matrix< int > &coef_matrix,
+	int ncols2convert,
     int tailbite_length,
     int max_iterations,
     int n_frame_errors,

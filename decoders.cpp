@@ -666,7 +666,7 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 
 		st->fht_cw = (short*)calloc(st->nh, sizeof(st->fht_cw[0]) );
 
-		st->fht_coef_mode = 0;
+		st->fht_ncols2convert = 0;
 
 		break;
 
@@ -980,8 +980,6 @@ int decod_init( void *state )
 {
 	int i, j;
 	DEC_STATE* st = (DEC_STATE*)state;
-	short *gf2log;
-	short *gf2alog;
 
 	if( !st ) 
 		return 1;
@@ -1115,22 +1113,20 @@ int decod_init( void *state )
 		if( st->fht_t==NULL || st->fht_ti==NULL)
 			return 0;
 
-		gf2log  = (short*)calloc( st->q, sizeof(short) );
-		gf2alog = (short*)calloc( st->q, sizeof(short) );
+		st->fht_gf2log  = (short*)calloc( st->q, sizeof(short) );
+		st->fht_gf2alog = (short*)calloc( st->q, sizeof(short) );
 
-		prepare_mul_tab( st->hb, st->hc, st->rh, st->nh, st->fht_list, st->fht_hc_rl, st->q_bits, gf2log, gf2alog, st->fht_t, st->fht_ti, st->fht_ilist, st->fht_ilist_size );
+		prepare_mul_tab( st->hb, st->hc, st->rh, st->nh, st->fht_list, st->fht_hc_rl, st->q_bits, st->fht_gf2log, st->fht_gf2alog, st->fht_t, st->fht_ti, st->fht_ilist, st->fht_ilist_size );
 
-		if( st->fht_coef_mode )
+		if( st->fht_ncols2convert )
 		{
 			// transform power representation to natural representation
 			int i, j;
 			for( i = 0; i < st->rh; i++ )
-				for( j = 0; j < st->nh; j++ )
-					st->hc[i][j] = gf2alog[st->hc[i][j]];
+				for( j = 0; j < st->fht_ncols2convert; j++ )
+					if( st->hc[i][j] > -1 )
+						st->hc[i][j] = st->fht_gf2alog[st->hc[i][j]];
 		}
-
-		free( gf2log );
-		free( gf2alog );
 
 		break;
 
@@ -1309,6 +1305,8 @@ void decod_close( DEC_STATE* st )
 		if( st->fht_buf0 )     { free2d_double( st->fht_buf0 );     st->fht_buf0     = NULL; }
 		if( st->fht_buf1 )     { free2d_double( st->fht_buf1 );     st->fht_buf1     = NULL; }
 		if( st->fht_cw )       { free( st->fht_cw );                st->fht_cw       = NULL; }
+		if( st->fht_gf2log )   { free( st->fht_gf2log );            st->fht_gf2log   = NULL; }
+		if( st->fht_gf2alog )  { free( st->fht_gf2alog );           st->fht_gf2alog  = NULL; }
 		break;
 
 	case TASP_DEC:

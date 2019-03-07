@@ -1,5 +1,5 @@
 {
-  _SNRs = array { 2.7 }
+  _SNRs = array { 2.7 3.0 }
   _decoder_name = "Layered Min-Sum"
   _decoder_type = 6
   _iterations = 15
