@@ -240,8 +240,10 @@ voltage_check_result equation_builder::check_voltages_and_coefs
 			 int coef_sum = coef_values[equations[i].first] - coef_values[equations[i].second];
 
 			 if( coef_sum == 0 )
+			 {
 				rv.first_failed_equation = num_failed;
-			 return rv;
+				return rv;
+			 }
 		 }
 	 }
 	 rv.first_failed_equation = -1;

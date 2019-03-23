@@ -170,6 +170,32 @@ void unpackMatrix_double2short(double m[], int height, int width, short *result[
 
 #endif  //SKIP_MEX
 
+
+void left2right( short **matr, int nrow, int ncol )
+{
+	int i, j;
+	short *buf = (short*)malloc( ncol * sizeof(buf[0]) );
+
+	for( i = 0; i < nrow; i++ )
+	{
+		int k = 0;
+		for( j = nrow; j < ncol; j++ )
+			buf[k++] = matr[i][j];
+
+		buf[k++] = matr[i][nrow-1];
+
+		for( j = 0; j < nrow-1; j++ )
+			buf[k++] = matr[i][j];
+
+		for( j = 0; j < ncol; j++ )
+			matr[i][j] = buf[j];
+	}
+
+	free( buf );
+}
+
+
+
 void update_statistics( double *prev_soft, double *curr_soft, double *sign_counter, double *min_abs_llr, double thr, int n )
 {
 	int i;
@@ -358,6 +384,10 @@ DEC_STATE* decod_open( int codec_id, int q_bits, int mh, int nh, int M )
 	}
 
 	st->q = st->bin_codec ? 1 : 1 << q_bits;
+
+	st->codeword = (int*)malloc( N * sizeof(st->codeword[0] ) );
+	if( st->codeword == NULL )
+		return NULL;
 
 	if( st->bin_codec )
 	{
@@ -1188,6 +1218,8 @@ void decod_close( DEC_STATE* st )
 	int codec_id = st->codec_id;
 	int R = mh * M;
 
+	if( st->codeword )  { free(st->codeword);              st->codeword = NULL; }
+
 	if( st->bin_codec )
 	{
 		if(st->hd)		{ free2d_short( st->hd );          st->hd       = NULL; }
@@ -1342,6 +1374,336 @@ void decod_close( DEC_STATE* st )
 
     free( st );
 }
+
+#define XOX   0
+#define OXO   1
+
+int encode_NBQCLDPC( DEC_STATE* st, int *msg )
+{
+	const int prim[] = {023, 045, 0103, 0203, 0435};
+	int i, j;
+	int ncols = st->nh;
+	int nrows = st->rh;
+	short *synd = st->syndr;
+	int q = st->q;
+	int M = st->m;
+	int *codeword = st->codeword;
+	short **HB = st->hb;
+	short **HC = st->hc;
+    
+    int flag;
+	int r;   // number of parity check
+	int n;   // code length
+	int k;   // message length  
+	int alpha, beta, gamma, d1, d2, d3;
+	int pos_beta;
+	int invbeta;
+	int scheme;
+	int spec_col_weight;
+	int **MulTable;
+	int *InvTable;
+	int *mblock;
+	int *mblock1;
+	int *mblock2;
+	int *buf;
+	short *sumsynd;
+
+	int c = ncols;
+	int b = nrows;
+	int mod = q-1;
+
+	for( i = 0; i < nrows; i++ )
+	{
+		for( j = 0; j < ncols; j++ )
+		{
+			if( HB[i][j] != -1 )
+			{
+				if( HC[i][j] <= 0 || HC[i][j] >= q )
+				{
+					printf("Elements of HC are to be nonzero elements of GF\n");
+					return 0;
+				}
+			}
+		}
+	}
+
+	r = b * M;   // number of parity check
+	n = c * M;   // code length
+	k = n - r;   // message length  
+	
+//	for( i = 0; i < n; i++ )
+//		codeword[i] = 0;
+
+	// read cpecial column
+	alpha = HC[0][c-b];
+	gamma = HC[b-1][c-b];
+	d1    = HB[0][c-b];      // rotating degree
+	d3    = HB[b-1][c-b];
+
+	spec_col_weight = 0;
+	for( i = 0; i < nrows; i++ )
+	{
+		if( HB[i][c-b] != -1 )
+		{
+			spec_col_weight++;
+			if( spec_col_weight == 2 )
+				pos_beta = i;
+		}
+	}
+
+	switch( spec_col_weight )
+	{
+	case 2:
+		d1 = HC[0][c-b];
+	    d2 = HC[b-1][c-b];
+		scheme = XOX;
+	
+		if( d1 < 0 || d2 < 0 || d1 == d2 )
+		{
+			printf("Correct(c-b+1)st column of HC of weight 2:  (x -1...-1, y), x~=y\n");
+			return 0;
+		}
+
+		if( HB[0][c-b] != 0 || HB[b-1][c-b] != 0 )
+		{
+			printf("Correct (c-b+1)st column of HB of weight 2:  (x -1...-1, y), x~=y\n");
+			return 0;
+		}
+
+		beta = alpha ^ gamma;
+		break;
+
+	case 3:  
+		if( alpha !=gamma )
+		{
+			printf("Correct (c-b+1)st column of HC of weight 3: (x -1...y...-1, x)\n");
+			return 0;
+		}
+
+		beta = HC[pos_beta][c-b];
+		d2   = HB[pos_beta][c-b];
+
+		if( (d1 !=d3) || (d1 == 0 && d2 == 0) || (d1 > 0 && d2 > 0) )
+		{
+			printf("Correct (c-b+1)st column of HB of weight 3 are either\n"); 
+		    printf("(x -1...0...-1, x), or (0 -1...x...-1, 0), x~=0\n");
+		}
+		scheme = d1 ==0 ? OXO : XOX;
+		break;
+	default:
+		printf("wrong weight special column of H\n");
+		return 0;
+	}
+
+
+	buf  = (int*)malloc( M * sizeof(buf[0]) );
+	sumsynd = (short*)malloc( M*sizeof(sumsynd[0] ) );
+
+	MulTable = Alloc2d_int( q, q );
+	InvTable = (int*)malloc( q * sizeof(InvTable[0]) );
+
+	
+	//InvTable[0] = 0;
+	for( i = 0; i < q; i++ )
+	{
+		for( j = 0; j < q; j++ )
+		{
+			if( i == 0 || j == 0 )
+				MulTable[i][j] = 0;
+			else
+			{
+				int x = st->fht_gf2log[i] + st->fht_gf2log[j];
+				if( x >= mod )
+					x -= mod;
+				if( x < 0 )
+					x += mod;
+
+				MulTable[i][j] = st->fht_gf2alog[x];
+
+				if( MulTable[i][j] == 1 )
+					InvTable[i] = j;
+			}
+		}
+	}
+
+	invbeta = InvTable[beta];
+
+	// auxilary blocks
+	mblock  = (int*)malloc( M * sizeof(mblock[0]) );
+	mblock1 = (int*)malloc( M * sizeof(mblock1[0]) );
+	mblock2 = (int*)malloc( M * sizeof(mblock2[0]) );
+
+	// Generate info part of codeword
+	for( i = 0; i < k; i++ )
+		codeword[i] = msg[i];
+
+	//Compute partial syndrome
+	for( i = 0; i < r; i++ ) 
+		synd[i] = 0;
+
+	for( j = 0; j < c-b; j++ )    // for all columns 
+	{
+		int *y = &codeword[j * M]; // read block
+		short *sndr = synd;
+
+		for( i = 0; i < b; i++ )  // for all rows
+		{
+			// circulate and add
+			int circ = HB[i][j];
+
+			if( circ != - 1 )
+			{
+				int I;
+
+				rotate( y, buf, circ, sizeof(y[0]), M );
+
+				for( I = 0; I < M; I++ )
+					buf[I] = MulTable[ buf[I] ][ HC[i][j] ];
+
+				for( I = 0; I < M; I++ )
+					sndr[I] ^= buf[I];
+			}
+
+			sndr += M;
+		}
+	}
+
+	// Compute sum of syndrom components
+	for( i = 0; i < M; i++ )
+		sumsynd[i] = 0;
+	for( i = 0; i < b; i++ )
+	{
+		for( j = 0; j < M; j++ )
+			sumsynd[j] ^= synd[i * M + j];
+	}
+	// One check block is known
+	for( i = 0; i < M; i++ )
+		mblock[i] = MulTable[sumsynd[i]][invbeta]; // Multiplyte middle
+
+	// substitute to codeword
+	if( scheme == OXO )
+	{
+		for( i = 0; i < M; i++ )
+			mblock1[i] = mblock[i]; // keep a non-rotated copy
+
+		rotate( mblock1, mblock, M-d2, sizeof(mblock[0]), M );
+	}
+
+	for( i = 0; i < M; i++ )
+		codeword[k + i] = mblock[i];
+
+	//Partial syndrom modification
+	switch( spec_col_weight )
+	{
+	case 2:
+		for( i = 0; i < M; i++ ) mblock1[i] = MulTable[mblock[i]][alpha];
+		for( i = 0; i < M; i++ ) mblock2[i] = MulTable[mblock[i]][gamma];
+		for( i = 0; i < M; i++ ) synd[i] ^= mblock1[i];
+		for( i = 0; i < M; i++ ) synd[(b-1)*M + i] ^= mblock2[i];
+		
+		break;
+
+	case 3:  
+		for( i = 0; i < M; i++ ) mblock[i] = MulTable[mblock[i]][alpha]; //% muliply 1st an last
+		
+		switch( scheme )
+		{
+		case XOX: 
+			rotate( mblock, buf, d1, sizeof(mblock[0]), M );
+
+			for( j = 0; j < M; j++ ) synd[j] ^= buf[j];
+			for( j = 0; j < M; j++ ) synd[pos_beta*M + j] ^= sumsynd[j];
+			for( j = 0; j < M; j++ ) synd[(b-1)*M + j] ^= buf[j];
+			break;
+		case OXO:
+			for( j = 0; j < M; j++ ) synd[j] ^= mblock[j];
+			for( j = 0; j < M; j++ ) synd[pos_beta*M + j] ^= sumsynd[j];
+			for( j = 0; j < M; j++ ) synd[(b-1)*M + j] ^= mblock[j];
+			break;
+	   }
+	    
+		break;
+	}
+	
+	//recursion
+	for( i = c-b+2; i <= c; i++ ) // current col
+	{
+		int I;
+		int invb;
+		short B;
+
+		j = i-c+b-2; // current row
+		B = HC[j][i-1];
+		invb = InvTable[B]; //find(MulTable(B+1,:)==1)-1;
+		
+		for( I = 0; I < M; I++ )
+			codeword[(i-1)*M + I] = MulTable[synd[j*M+I]][invb];
+
+		for( I = 0; I < M; I++ )
+			synd[(j+1)*M + I] ^= synd[j*M + I];
+    }
+
+	// CHECK for being a proper codeword
+
+	for( i = 0; i < r; i++ )
+		synd[i] = 0;
+
+	for( j = 0; j < c; j++ )
+	{
+		int *y = &codeword[j*M]; // read block
+			
+		for( i = 0; i < b; i++ )
+		{
+			int I;
+			short circ = HB[i][j];
+
+			if( circ != -1 )
+			{
+				rotate( y, buf, circ, sizeof(y[0]), M );
+				
+				for( I = 0; I < M; I++ )
+					buf[I] = MulTable[buf[I]][HC[i][j]];
+			
+				for( I = 0; I < M; I++ )
+					synd[i*M + I] ^= buf[I];
+			}
+		} 
+		/*
+		for( i = 0; i < M; i++ )
+			sumsynd[i] = 0;
+
+		for( i = 0; i < b; i++ )
+		{
+			int k;
+			for( k = 0; k < M; k++ )
+				sumsynd[k] ^= synd[i * M + k];
+		}
+		*/
+	}
+
+	flag = 1;
+	for( i = 0; i < r; i++ )
+		flag &= synd[i] == 0;
+
+	if( flag == 0 )
+	{
+		printf("bad coding\n");
+		return 0;
+	}
+//	xb=word2bin(codeword,p); %codeword in bits
+//  codewordb=reshape(xb',1,n*p);
+
+	free2d_int( MulTable );
+	free( InvTable );
+	free( mblock );
+	free( mblock1 );
+	free( mblock2 );
+	free( buf );
+	free( sumsynd );
+
+	return 1;
+}
+
 
 int bp_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision )
 { 

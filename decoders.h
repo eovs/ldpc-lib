@@ -146,6 +146,7 @@ typedef struct
 	short   **hd; 
 	short   **hb; 
 	short   **hc; 
+	int *codeword;
 	double  *y;
 	double  *decword;
 	short   *syndr;                     
@@ -302,7 +303,9 @@ int sum_prod_gfq_decod_lm( DEC_STATE* st, double *soft[], short *qhard, double *
 int tdmp_sum_prod_gf2_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision );    
 int lmin_sum_decod_qc_lm( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision, double alpha, double beta );    
 int lche_decod( DEC_STATE* st, double soft[], double decword[], int maxiter, int decision );    
+int encode_NBQCLDPC( DEC_STATE* st, int *msg );
 
+void left2right( short **matr, int nrow, int ncol );
 
 
 

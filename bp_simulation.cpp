@@ -324,7 +324,7 @@ pair<double, double> bp_simulation(
     int b = code_generating_matrix.n_rows();
     int c = code_generating_matrix.n_cols();
     int r = b * tailbite_length;
-    int n = c * tailbite_length;
+    int n = c * tailbite_length;		// codeword length is measured in q-symbols
 	int M = tailbite_length;
 	int q_bits;
     int i, j;
@@ -340,50 +340,62 @@ pair<double, double> bp_simulation(
 //	double p_thr = exp( (double)-9 );
 	double p_thr = 0;
 
-    static DEC_STATE *dec_state =  NULL;
+    static DEC_STATE *codec_state =  NULL;
 	static PERMSTATE* perm_state = NULL;
+
+	int leftDiag = 1;
 
 	q_bits = binlog( q_mod );
 
-	if( dec_state )
-		decod_close( dec_state );
+	if( codec_state )
+		decod_close( codec_state );
 	
-	dec_state = decod_open( decoder_type, q_bits, b, c, tailbite_length );
-	if( !dec_state )
+	codec_state = decod_open( decoder_type, q_bits, b, c, tailbite_length );
+	if( !codec_state )
 		die("Can't open decode");
 
 	if( q_mod == 2 )
 	{
 		for( i = 0; i < b; i++ )
 		   for( j = 0; j < c; j++ )
-			    dec_state->hd[i][j] = code_generating_matrix(i, j);
+			    codec_state->hd[i][j] = code_generating_matrix(i, j);
 	}
 	else
 	{
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
-				dec_state->hb[i][j] = code_generating_matrix(i, j);
+				codec_state->hb[i][j] = code_generating_matrix(i, j);
 
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
-				dec_state->hc[i][j] = coef_matrix(i, j);
+				codec_state->hc[i][j] = coef_matrix(i, j);
 
 
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
-				if( dec_state->hc[i][j] == q_mod )
+				if( codec_state->hc[i][j] == q_mod )
 					break;
 
 
-		dec_state->fht_ncols2convert = ncols2convert;
+		codec_state->fht_ncols2convert = ncols2convert;
 	}
-	decod_init( dec_state );
+	decod_init( codec_state );
 
 	if( q_mod > 2 )
 	{
 		for( i = 0; i < b; i++ )
 			for( j = 0; j < c; j++ )
-				coef_matrix(i, j) = dec_state->hc[i][j];
+				coef_matrix(i, j) = codec_state->hc[i][j];
+	}
+
+	if( q_mod > 2 )
+	{
+		left2right( codec_state->hb, b, c );
+		left2right( codec_state->hc, b, c );
+
+		// init fht-codec for new HB & HC
+		codec_state->fht_ncols2convert = 0;
+		decod_init( codec_state );
 	}
 
 	//modulation_type = MODULATION_QAM16;
@@ -410,9 +422,9 @@ pair<double, double> bp_simulation(
 		die("Can't open permutations");
 	
 	if( q_mod == 2 )
-		Permutation_Init( perm_state, dec_state->hd );
+		Permutation_Init( perm_state, codec_state->hd );
 	else
-		Permutation_Init( perm_state, dec_state->hb );
+		Permutation_Init( perm_state, codec_state->hb );
 
 	int moddim = 2 * halfmlog;
 
@@ -427,7 +439,6 @@ pair<double, double> bp_simulation(
 	qam_mod_st = QAM_modulator_open( QAM, n_ext, moddim );
 	if( !qam_mod_st )
 		die("Can't open QAM modulator");
-
 
     //double bitrate = (double) (c - b) / c;
 	double bitrate = (double) (c - b) / (c - punctured_blocks);
@@ -514,18 +525,37 @@ pair<double, double> bp_simulation(
 			//return make_pair(10.0, 10.0);
 			zero_codeword = true;
 		}
+
+		if( zero_codeword )
+		{
+			for( i = 0; i < n; i++ )
+				codeword.push_back(0);
+		}
     }
 	else
 	{
 		// q-encoder
-		zero_codeword = true;
+		int flag;
+		int *msg = (int*)malloc(n*sizeof(msg[0]));
+#if 0
+		for( int i = 0; i < n; i++ ) msg[i] = rand() % q_mod;
+#else
+		{
+			int msg0[] = {6, 11, 0, 4, 2, 1, 2, 5};
+			for( int i = 0; i < 8; i++ ) msg[i] = msg0[i];
+		}
+#endif
+		flag = encode_NBQCLDPC( codec_state, msg );
+
+		free( msg );
+
+		if( flag == 0 )
+			for( i = 0; i < n; i++ )
+				codec_state->codeword[i] = 0;
+
+		zero_codeword = flag == 0 ? true : false;
 	}
 	
-	if( zero_codeword )
-	{
-		for( i = 0; i < n; i++ )
-			codeword.push_back(0);
-	}
 
 
     // 4. Simulation
@@ -549,7 +579,7 @@ pair<double, double> bp_simulation(
 	else
 	{
 		for( i = 0; i < n; i++ )
-			word2bin( codeword[i], &perm_state->buffer[i*q_bits], q_bits );
+			word2bin( codec_state->codeword[i], &perm_state->buffer[i*q_bits], q_bits );
 
 		Permutation(perm_state, 0, perm_state->buffer, perm_state->perm_codeword );		//direct permutation
 
@@ -637,23 +667,23 @@ pair<double, double> bp_simulation(
 						sum = 0.0;
 						for( j = 0; j < q_mod; j++ )
 						{
-							dec_state->qy[j][i] = std::exp( LH[j] );
-							sum += dec_state->qy[j][i];
+							codec_state->qy[j][i] = std::exp( LH[j] );
+							sum += codec_state->qy[j][i];
 						}
 
 						for( j = 0; j < q_mod; j++ )
-							dec_state->qy[j][i] /= sum;
+							codec_state->qy[j][i] /= sum;
 					}
 					break;
 				}
 			}
 
-			//memcpy( perm_state->buffer, dec_state->y, n*sizeof(dec_state->y[0]));
+			//memcpy( perm_state->buffer, codec_state->y, n*sizeof(codec_state->y[0]));
 
 			if( q_mod == 2 )
-				Permutation(perm_state, 1, perm_state->buffer, dec_state->y );		// Inverse permutation
+				Permutation(perm_state, 1, perm_state->buffer, codec_state->y );		// Inverse permutation
 //			else
-//				Permutation(perm_state, 1, perm_state->buffer, dec_state->y );		// Inverse permutation
+//				Permutation(perm_state, 1, perm_state->buffer, codec_state->y );		// Inverse permutation
 
 #if 0
 	            int iter = bp_decod_lm( received, C, V, VI, col_weights, row_weights, max_iterations );
@@ -669,14 +699,14 @@ pair<double, double> bp_simulation(
 				// imitate puncturing
 				double init_val = qam_demod_st->DemodOutType == 1 ? 0 : 0.5;
 
-				int plen = dec_state->m * punctured_blocks;
+				int plen = codec_state->m * punctured_blocks;
 				int pstart = n - plen;
 //				int pstart = 0;
-//				int pstart = dec_state->rh*dec_state->m;
+//				int pstart = codec_state->rh*codec_state->m;
 				int pstop  = pstart + plen;
 
 				for( i = pstart; i < pstop; i++ )
-					dec_state->y[i] = init_val;
+					codec_state->y[i] = init_val;
 			}
 			else
 			{
@@ -685,16 +715,16 @@ pair<double, double> bp_simulation(
 
             switch( decoder_type )
             {
-            case BP_DEC:    iter = bp_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);				 break;
-            case SP_DEC:    iter = sum_prod_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);			 break;
-            case ASP_DEC:   iter = sum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
-            case MS_DEC:    iter = min_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA); break;
-            case IMS_DEC:   iter = imin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_THR, MS_QBITS, MS_DBITS); break;
-            case IASP_DEC:  iter = isum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
-			case FHT_DEC:   iter = sum_prod_gfq_decod_lm( dec_state, dec_state->qy, dec_state->qhard, dec_state->qdecword, max_iterations, p_thr );	 break;
-			case TASP_DEC:  iter = tdmp_sum_prod_gf2_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
-			case LMS_DEC:   iter = lmin_sum_decod_qc_lm( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_BETA); break;
-			case LCHE_DEC:  iter = lche_decod( dec_state, dec_state->y, dec_state->decword, max_iterations, DEC_DECISION);		 break;
+            case BP_DEC:    iter = bp_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);				 break;
+            case SP_DEC:    iter = sum_prod_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);			 break;
+            case ASP_DEC:   iter = sum_prod_gf2_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);		 break;
+            case MS_DEC:    iter = min_sum_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA); break;
+            case IMS_DEC:   iter = imin_sum_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_THR, MS_QBITS, MS_DBITS); break;
+            case IASP_DEC:  iter = isum_prod_gf2_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);		 break;
+			case FHT_DEC:   iter = sum_prod_gfq_decod_lm( codec_state, codec_state->qy, codec_state->qhard, codec_state->qdecword, max_iterations, p_thr );	 break;
+			case TASP_DEC:  iter = tdmp_sum_prod_gf2_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);		 break;
+			case LMS_DEC:   iter = lmin_sum_decod_qc_lm( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION, MS_ALPHA, MS_BETA); break;
+			case LCHE_DEC:  iter = lche_decod( codec_state, codec_state->y, codec_state->decword, max_iterations, DEC_DECISION);		 break;
             default: iter = -1; die("Unknown decoder type: %d", decoder_type); break;
             }
 
@@ -703,7 +733,7 @@ pair<double, double> bp_simulation(
 				if( q_mod == 2 )
 				{
 					for (i = 0; i < n; i++) {
-						if (dec_state->decword[i] != (short)codeword[i]) {
+						if (codec_state->decword[i] != (short)codeword[i]) {
 							++curr_nse;
 							if (i >= r) {
 								++curr_nse_info;
@@ -715,7 +745,7 @@ pair<double, double> bp_simulation(
 				{
 					for( i = 0; i < n; i++ ) 
 					{
-						if( dec_state->qhard[i] != (short)codeword[i]) 
+						if( codec_state->qhard[i] != (short)codec_state->codeword[i]) 
 						{
 							curr_nse++;
 							if( i >= r )
@@ -737,7 +767,7 @@ pair<double, double> bp_simulation(
 				case LMS_DEC:
 				case LCHE_DEC:
                     for (i = 0; i < n; i++) {
-                        if ((dec_state->decword[i] < 0.0) != codeword[i]) {
+                        if ((codec_state->decword[i] < 0.0) != codeword[i]) {
                             ++curr_nse;
                             if (i >= r) {
                                 ++curr_nse_info;
@@ -747,7 +777,7 @@ pair<double, double> bp_simulation(
                     break;
                 case SP_DEC:
                     for (i = 0; i < n; i++) {
-                        if ((dec_state->decword[i] < 0.5) != codeword[i]) {
+                        if ((codec_state->decword[i] < 0.5) != codeword[i]) {
                             ++curr_nse;
                             if (i >= r) {
                                 ++curr_nse_info;
@@ -757,7 +787,7 @@ pair<double, double> bp_simulation(
                     break;
                 case ASP_DEC:
                     for (i = 0; i < n; i++) {
-                        if ((dec_state->decword[i] > 0.5) != codeword[i]) {
+                        if ((codec_state->decword[i] > 0.5) != codeword[i]) {
                             ++curr_nse;
                             if (i >= r) {
                                 ++curr_nse_info;
@@ -766,7 +796,7 @@ pair<double, double> bp_simulation(
                     }
                     break;
                 case IASP_DEC:
-//                    for (i = 0; i < n; i++) curr_nse += (dec_state->decword[i] > 0.5) != codeword[i];
+//                    for (i = 0; i < n; i++) curr_nse += (codec_state->decword[i] > 0.5) != codeword[i];
                     break;
                 }
             }
@@ -798,8 +828,8 @@ pair<double, double> bp_simulation(
     }
 
 
-	decod_close( dec_state );
-	dec_state = NULL;
+	decod_close( codec_state );
+	codec_state = NULL;
 	Permutations_Close( perm_state );
 	perm_state = NULL;
 	QAM_modulator_close( qam_mod_st);
